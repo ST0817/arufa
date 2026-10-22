@@ -7,4 +7,5 @@ edition = "2024"
 ariadne = "0.6.0"
 chumsky = "0.13.0"
 clap = { version = "4.6.7", features = ["derive"] }
+inkwell = { version = "0.11.0", features = ["llvm23-1"] }
 thiserror = "2.0.21"

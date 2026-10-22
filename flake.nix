@@ -25,7 +25,6 @@
       systems = import systems;
       perSystem =
         {
-          self',
           pkgs,
           system,
           ...
@@ -37,9 +36,20 @@
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           src = craneLib.cleanCargoSource ./.;
+          buildInputs = with pkgs; [
+            libffi
+            zlib
+            libxml2
+            stdenv.cc.cc.lib
+          ];
           commonArgs = {
             inherit src;
             strictDeps = true;
+            nativeBuildInputs = with pkgs; [
+              llvmPackages_23.llvm
+              autoPatchelfHook
+            ];
+            inherit buildInputs;
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           crate = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
@@ -63,12 +73,13 @@
             inherit clippy;
           };
           devShells.default = craneLib.devShell {
-            inputsFrom = [ self'.packages.default ];
+            inputsFrom = [ crate ];
             packages = with pkgs; [
               nixd
               nixfmt
               taplo
             ];
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
           };
         };
     };

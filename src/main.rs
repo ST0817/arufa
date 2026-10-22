@@ -2,17 +2,23 @@ use std::{fs::File, io::Read, process::ExitCode};
 
 use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::{Parser, error::Rich};
+use inkwell::context::Context;
 
-use crate::{cli::Cli, error::Error, parse::parser};
+use crate::{cli::Cli, compile::Compiler, emit::emit, error::Error, parse::parser};
 
 mod cli;
+mod compile;
+mod emit;
 mod error;
 mod parse;
 
 fn run(cli: &Cli, src: &mut String) -> Result<(), Error> {
     File::open(cli.src_path())?.read_to_string(src)?;
     let value = parser().parse(src).into_result()?;
-    println!("parsed: {value}");
+    let context = Context::create();
+    let compiler = Compiler::new(&context);
+    let module = compiler.compile(value)?;
+    emit(cli, &module)?;
     Ok(())
 }
 
@@ -37,11 +43,14 @@ fn main() -> ExitCode {
     let mut src = String::new();
     match run(&cli, &mut src) {
         Ok(()) => ExitCode::SUCCESS,
+        Err(Error::Parse(errors)) => {
+            report_parse_errors(&errors, &src);
+            ExitCode::FAILURE
+        }
         Err(error) => {
-            use Error::*;
-            match error {
-                IO(error) => eprintln!("{error}"),
-                Parse(errors) => report_parse_errors(&errors, &src),
+            eprintln!("{error}");
+            if error.is_internal() {
+                eprintln!("This error is an internal error. Please report it.");
             }
             ExitCode::FAILURE
         }

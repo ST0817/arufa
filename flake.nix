@@ -71,6 +71,11 @@
           checks = {
             inherit crate;
             inherit clippy;
+            test = pkgs.runCommandCC "test" { nativeBuildInputs = [ crate ]; } ''
+              export ARUFA=${crate}/bin/arufa
+              ${./test/run.sh}
+              touch $out
+            '';
           };
           devShells.default = craneLib.devShell {
             inputsFrom = [ crate ];

@@ -1,35 +1,43 @@
+#![feature(trait_alias)]
+
 use std::{fs::File, io::Read, process::ExitCode};
 
 use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
-use chumsky::{Parser, error::Rich};
+use chumsky::span::Spanned;
 use inkwell::context::Context;
 
-use crate::{cli::Cli, compile::Compiler, emit::emit, error::Error, parse::parser};
+use crate::{
+    cli::Cli, compile::Compiler, emit::emit, error::Error, parse::parse, tokenize::tokenize,
+};
 
+mod ast;
 mod cli;
 mod compile;
 mod emit;
 mod error;
 mod parse;
+mod token;
+mod tokenize;
 
 fn run(cli: &Cli, src: &mut String) -> Result<(), Error> {
     File::open(cli.src_path())?.read_to_string(src)?;
-    let value = parser().parse(src).into_result()?;
+    let tokens = tokenize(src)?;
+    let expr = parse(&tokens, src)?;
     let context = Context::create();
     let compiler = Compiler::new(&context);
-    let module = compiler.compile(value)?;
+    let module = compiler.compile(&expr)?;
     emit(cli, &module)?;
     Ok(())
 }
 
-fn report_parse_errors(errors: &[Rich<char>], src: &str) {
+fn report_parse_errors(errors: &[Spanned<String>], src: &str) {
     for error in errors {
-        Report::build(ReportKind::Error, error.span().into_range())
+        Report::build(ReportKind::Error, error.span.into_range())
             .with_config(Config::new().with_index_type(IndexType::Byte))
-            .with_message(error.to_string())
+            .with_message(error.inner.clone())
             .with_label(
-                Label::new(error.span().into_range())
-                    .with_message(error.reason().to_string())
+                Label::new(error.span.into_range())
+                    .with_message(error.inner.clone())
                     .with_color(Color::Red),
             )
             .finish()

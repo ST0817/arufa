@@ -9,5 +9,5 @@
 /target
 
 # test
-/test/int.o
-/test/int
+/test/*
+!/test/*.arufa

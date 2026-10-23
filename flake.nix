@@ -32,7 +32,7 @@
         let
           toolchain = pkgs.fenix.fromToolchainFile {
             file = ./rust-toolchain.toml;
-            sha256 = "sha256-+xUr6Al1wZSqX8aEsq7DpuFOK4Ve/i+qTl+K5uWQ9GM=";
+            sha256 = "sha256-V6dLt89/mszjKbYHRZ2s6fSfFTvoMrTv9o1Y4BDCMWk=";
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
           src = craneLib.cleanCargoSource ./.;

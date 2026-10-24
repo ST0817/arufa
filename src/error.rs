@@ -10,11 +10,12 @@ use chumsky::{
 use inkwell::builder::BuilderError;
 use thiserror::Error;
 
-use crate::token::Token;
+use crate::{ast::Type, token::Token};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CheckErrorKind {
     UndefinedVariable,
+    TypeMismatch { expected: Type, found: Type },
 }
 
 impl Display for CheckErrorKind {
@@ -22,6 +23,9 @@ impl Display for CheckErrorKind {
         use CheckErrorKind::*;
         match self {
             UndefinedVariable => f.write_str("undefined variable"),
+            TypeMismatch { expected, found } => {
+                write!(f, "type mismatch: expected {expected}, found {found}")
+            }
         }
     }
 }

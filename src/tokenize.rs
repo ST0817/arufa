@@ -4,7 +4,7 @@ use chumsky::{
     extra::Err,
     primitive::{any, choice, just},
     span::Spanned,
-    text::int,
+    text::{ascii::keyword, int},
 };
 
 use crate::{
@@ -26,8 +26,13 @@ fn tokenizer<'src>()
         just('/').to(Slash),
         just('%').to(Perc),
         just('=').to(Eq),
+        just(':').to(Colon),
         just(';').to(Semic),
-        just("var").to(Var),
+        keyword("i32").to(I32),
+        keyword("bool").to(Bool),
+        keyword("true").to(True),
+        keyword("false").to(False),
+        keyword("var").to(Var),
         int.map(Int),
         name.map(Name),
     ))

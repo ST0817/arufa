@@ -1,5 +1,5 @@
-var x;
-var y;
+var x: i32;
+var y: i32;
 x = 42;
 y = 53;
 x + y

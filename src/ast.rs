@@ -1,4 +1,22 @@
+use std::fmt::{self, Display, Formatter};
+
 use chumsky::span::Spanned;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Type {
+    I32,
+    Bool,
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use Type::*;
+        match self {
+            I32 => f.write_str("i32"),
+            Bool => f.write_str("bool"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
@@ -12,14 +30,15 @@ pub enum BinOp {
 #[derive(Debug)]
 pub enum Expr<'src> {
     Int(u32),
-    Bin(Box<Self>, BinOp, Box<Self>),
+    Bool(bool),
     Var(Spanned<&'src str>),
+    Bin(Spanned<Box<Self>>, BinOp, Spanned<Box<Self>>),
 }
 
 #[derive(Debug)]
 pub enum Stmt<'src> {
-    Var(&'src str),
-    Assign(Spanned<&'src str>, Expr<'src>),
+    Var(&'src str, Type),
+    Assign(Spanned<&'src str>, Spanned<Expr<'src>>),
 }
 
 #[derive(Debug)]

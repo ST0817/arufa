@@ -1,3 +1,6 @@
 fn main() -> i32 {
-    iprint(42)
+    var x: i32;
+    x = iprint(42);
+    x = print("Hello world!");
+    x
 }

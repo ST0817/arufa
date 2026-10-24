@@ -2,9 +2,9 @@ use chumsky::{
     IterParser, Parser,
     error::Rich,
     extra::Err,
-    primitive::{any, choice, just},
+    primitive::{any, choice, just, none_of},
     span::Spanned,
-    text::{ascii::keyword, int},
+    text::{self, ascii::keyword},
 };
 
 use crate::{
@@ -12,14 +12,42 @@ use crate::{
     token::Token::{self, *},
 };
 
-fn tokenizer<'src>()
--> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, Err<Rich<'src, char>>> {
-    let int = int(10).from_str().unwrapped();
-    let name = any()
+trait Tokenizer<'src, T> = Parser<'src, &'src str, T, Err<Rich<'src, char>>>;
+
+fn int<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    text::int(10).from_str().unwrapped().map(Int)
+}
+
+fn escape<'src>() -> impl Tokenizer<'src, char> {
+    just('\\').ignore_then(choice((
+        just('\\').to('\\'),
+        just('n').to('\n'),
+        just('r').to('\n'),
+        just('t').to('\n'),
+        just('0').to('\n'),
+        just('\'').to('\''),
+        just('"').to('"'),
+    )))
+}
+
+fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    choice((escape(), none_of(r#"""#).filter(char::is_ascii)))
+        .repeated()
+        .to_slice()
+        .delimited_by(just('"'), just('"'))
+        .map(Str)
+}
+
+fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    any()
         .filter(char::is_ascii_alphabetic)
         .ignore_then(any().filter(char::is_ascii_alphanumeric).repeated())
-        .to_slice();
-    let symbols = choice((
+        .to_slice()
+        .map(Name)
+}
+
+fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    choice((
         just('+').to(Plus),
         just("->").to(Arrow),
         just('-').to(Minus),
@@ -41,8 +69,11 @@ fn tokenizer<'src>()
         just(')').to(RParen),
         just('{').to(LBrace),
         just('}').to(RBrace),
-    ));
-    let keywords = choice((
+    ))
+}
+
+fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    choice((
         keyword("i32").to(I32),
         keyword("bool").to(Bool),
         keyword("true").to(True),
@@ -51,8 +82,11 @@ fn tokenizer<'src>()
         keyword("else").to(Else),
         keyword("var").to(Var),
         keyword("fn").to(Fn),
-    ));
-    choice((symbols, keywords, int.map(Int), name.map(Name)))
+    ))
+}
+
+fn tokenizer<'src>() -> impl Tokenizer<'src, Vec<Spanned<Token<'src>>>> {
+    choice((symbols(), keywords(), int(), str(), name()))
         .spanned()
         .padded()
         .repeated()

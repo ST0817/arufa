@@ -70,6 +70,11 @@ fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     choice((just(True).to(true), just(False).to(false))).map(Expr::Bool)
 }
 
+fn str_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    select! { Token::Str(value) => Expr::Str(value) }
+}
+
 fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
@@ -220,6 +225,7 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         let atom = choice((
             int_expr(),
             bool_expr(),
+            str_expr(),
             if_expr(expr.clone()),
             call_expr(expr.clone()),
             var_expr(),

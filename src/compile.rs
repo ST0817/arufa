@@ -70,6 +70,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         match ty {
             I32 => self.context.i32_type().as_basic_type_enum(),
             Bool => self.context.bool_type().as_basic_type_enum(),
+            Str => self
+                .context
+                .ptr_type(AddressSpace::default())
+                .as_basic_type_enum(),
         }
     }
 
@@ -89,6 +93,11 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .const_int(value as u64, false)
             .as_basic_value_enum();
         Ok(Value::new(basic_value, Type::Bool))
+    }
+
+    fn compile_str_expr(&self, value: &'src str) -> Result<Value<'ctx>, Error> {
+        let global_value = self.builder.build_global_string_ptr(value, "str")?;
+        Ok(Value::new(global_value.as_basic_value_enum(), Type::Str))
     }
 
     fn compile_var_expr(
@@ -274,6 +283,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         match expr {
             Int(value) => self.compile_int_expr(*value),
             Bool(value) => self.compile_bool_expr(*value),
+            Str(value) => self.compile_str_expr(value),
             Var(name) => self.compile_var_expr(name, scope),
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
@@ -325,6 +335,37 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             self.compile_stmt(stmt, scope)?;
         }
         self.compile_expr(block.tail(), scope)
+    }
+
+    fn def_print(&mut self) -> Result<(), Error> {
+        let puts_type = self.context.void_type().fn_type(
+            &[self.context.ptr_type(AddressSpace::default()).into()],
+            true,
+        );
+        let puts = self.module.add_function("puts", puts_type, None);
+
+        let print_type = self.context.i32_type().fn_type(
+            &[self.context.ptr_type(AddressSpace::default()).into()],
+            false,
+        );
+        let print = self.module.add_function("print", print_type, None);
+        self.func_defs.insert(
+            "print",
+            FuncDef::new(print, FuncSig::new(vec![Type::Str], Type::I32)),
+        );
+        let print_entry = self.context.append_basic_block(print, "entry");
+        self.builder.position_at_end(print_entry);
+        let param = print.get_nth_param(0).unwrap().into_pointer_value();
+        self.builder
+            .build_call(puts, &[param.into()], "puts_call")?;
+        self.builder.build_return(Some(
+            &self
+                .context
+                .i32_type()
+                .const_int(0, false)
+                .as_basic_value_enum(),
+        ))?;
+        Ok(())
     }
 
     fn def_iprint(&mut self) -> Result<(), Error> {
@@ -404,6 +445,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     }
 
     fn compile_funcs(&mut self, funcs: &[Func<'src>]) -> Result<(), Error> {
+        self.def_print()?;
         self.def_iprint()?;
         for func in funcs {
             self.compile_func(func)?;

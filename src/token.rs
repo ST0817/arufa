@@ -32,6 +32,7 @@ pub enum Token<'src> {
     Var,
     Fn,
     Int(u32),
+    Str(&'src str),
     Name(&'src str),
 }
 
@@ -69,6 +70,7 @@ impl Display for Token<'_> {
             Var => f.write_str("var"),
             Fn => f.write_str("fn"),
             Int(value) => write!(f, "{value}"),
+            Str(value) => write!(f, r#""{value}""#),
             Name(name) => f.write_str(name),
         }
     }

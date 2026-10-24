@@ -6,6 +6,7 @@ use chumsky::span::Spanned;
 pub enum Type {
     I32,
     Bool,
+    Str,
 }
 
 impl Display for Type {
@@ -14,6 +15,7 @@ impl Display for Type {
         match self {
             I32 => f.write_str("i32"),
             Bool => f.write_str("bool"),
+            Str => f.write_str("str"),
         }
     }
 }
@@ -47,6 +49,7 @@ pub enum UnaryOp {
 pub enum Expr<'src> {
     Int(u32),
     Bool(bool),
+    Str(&'src str),
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),

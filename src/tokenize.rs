@@ -19,7 +19,7 @@ fn tokenizer<'src>()
         .filter(char::is_ascii_alphabetic)
         .ignore_then(any().filter(char::is_ascii_alphanumeric).repeated())
         .to_slice();
-    choice((
+    let symbols = choice((
         just('+').to(Plus),
         just('-').to(Minus),
         just('*').to(Star),
@@ -35,8 +35,13 @@ fn tokenizer<'src>()
         just("!=").to(NotEq),
         just(':').to(Colon),
         just(';').to(Semic),
+        just(',').to(Comma),
+        just('(').to(LParen),
+        just(')').to(RParen),
         just('{').to(LBrace),
         just('}').to(RBrace),
+    ));
+    let keywords = choice((
         keyword("i32").to(I32),
         keyword("bool").to(Bool),
         keyword("true").to(True),
@@ -44,13 +49,12 @@ fn tokenizer<'src>()
         keyword("if").to(If),
         keyword("else").to(Else),
         keyword("var").to(Var),
-        int.map(Int),
-        name.map(Name),
-    ))
-    .spanned()
-    .padded()
-    .repeated()
-    .collect()
+    ));
+    choice((symbols, keywords, int.map(Int), name.map(Name)))
+        .spanned()
+        .padded()
+        .repeated()
+        .collect()
 }
 
 pub fn tokenize<'src>(src: &'src str) -> Result<Vec<Spanned<Token<'src>>>, Error> {

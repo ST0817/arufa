@@ -16,6 +16,8 @@ use crate::{ast::Type, token::Token};
 pub enum CheckErrorKind {
     UndefinedVariable,
     TypeMismatch { expected: Type, found: Type },
+    UndefinedFunction,
+    ArgNumMismatch,
 }
 
 impl Display for CheckErrorKind {
@@ -26,6 +28,8 @@ impl Display for CheckErrorKind {
             TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {expected}, found {found}")
             }
+            UndefinedFunction => f.write_str("undefined function"),
+            ArgNumMismatch => f.write_str("the number of arguments does not match"),
         }
     }
 }

@@ -76,6 +76,21 @@ fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         .map(|((cond, then), els)| Expr::If(cond, then, els))
 }
 
+fn call_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    name()
+        .spanned()
+        .then(
+            expr.spanned()
+                .separated_by(just(Comma))
+                .collect()
+                .delimited_by(just(LParen), just(RParen))
+                .spanned(),
+        )
+        .map(|(name, args)| Expr::Call(name, args))
+}
+
 fn var_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     name().spanned().map(Expr::Var)
@@ -172,7 +187,13 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Block<'src>> {
     let mut expr = Recursive::declare();
     expr.define({
-        let atom = choice((int_expr(), bool_expr(), if_expr(expr.clone()), var_expr()));
+        let atom = choice((
+            int_expr(),
+            bool_expr(),
+            if_expr(expr.clone()),
+            call_expr(expr.clone()),
+            var_expr(),
+        ));
         op_expr(atom).labelled("expression")
     });
     block(expr)

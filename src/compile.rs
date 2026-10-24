@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use std::{iter::zip, rc::Rc};
 
-use chumsky::span::{SimpleSpan, Spanned};
+use chumsky::span::{SimpleSpan, SpanWrap, Spanned};
 use inkwell::{
-    IntPredicate,
+    AddressSpace, IntPredicate,
     builder::Builder,
     context::Context,
     module::Module,
@@ -13,6 +13,7 @@ use inkwell::{
 use crate::{
     ast::{ArithBinOp, Block, CmpBinOp, Expr, Stmt, Type, UnaryOp},
     error::{CheckError, CheckErrorKind::*, Error},
+    func_defs::{FuncDef, FuncDefs},
     scope::{Scope, Var},
 };
 
@@ -44,14 +45,15 @@ impl<'ctx> Value<'ctx> {
     }
 }
 
-struct Compiler<'ctx> {
+struct Compiler<'src, 'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
     main_func: FunctionValue<'ctx>,
+    decls: FuncDefs<'src, 'ctx>,
 }
 
-impl<'ctx> Compiler<'ctx> {
+impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn new(context: &'ctx Context) -> Self {
         let module = context.create_module("main");
         let main_type = context.i32_type().fn_type(&[], false);
@@ -61,6 +63,7 @@ impl<'ctx> Compiler<'ctx> {
             builder: context.create_builder(),
             module,
             main_func,
+            decls: FuncDefs::new(),
         }
     }
 
@@ -90,7 +93,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(basic_value, Type::Bool))
     }
 
-    fn compile_var_expr<'src>(
+    fn compile_var_expr(
         &self,
         name: &Spanned<&'src str>,
         scope: &mut Scope<'src, 'ctx>,
@@ -102,7 +105,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(basic_value, var.ty()))
     }
 
-    fn compile_arith_bin_expr<'src>(
+    fn compile_arith_bin_expr(
         &self,
         lhs: &Spanned<Box<Expr<'src>>>,
         op: ArithBinOp,
@@ -136,7 +139,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(int_value.into(), Type::I32))
     }
 
-    fn compile_cmp_bin_expr<'src>(
+    fn compile_cmp_bin_expr(
         &self,
         lhs: &Spanned<Box<Expr<'src>>>,
         op: CmpBinOp,
@@ -166,7 +169,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(int_value.into(), Type::Bool))
     }
 
-    fn compile_unary_expr<'src>(
+    fn compile_unary_expr(
         &self,
         expr: &Spanned<Box<Expr<'src>>>,
         op: UnaryOp,
@@ -189,7 +192,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_if_expr<'src>(
+    fn compile_if_expr(
         &self,
         cond: &Spanned<Box<Expr<'src>>>,
         then: &Block<'src>,
@@ -230,7 +233,40 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(phi.as_basic_value(), ty))
     }
 
-    fn compile_expr<'src>(
+    fn compile_call_expr(
+        &self,
+        name: &Spanned<&'src str>,
+        args: &Spanned<Vec<Spanned<Expr<'src>>>>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        let Some(func_def) = self.decls.get(name) else {
+            return Err(CheckError::new(UndefinedFunction, name.span).into());
+        };
+        if args.len() != func_def.param_types().len() {
+            return Err(CheckError::new(ArgNumMismatch, args.span).into());
+        }
+        let arg_values = args
+            .iter()
+            .map(|arg| Ok(self.compile_expr(arg, scope)?.with_span(arg.span)))
+            .collect::<Result<Vec<Spanned<Value>>, Error>>()?;
+        for (arg_value, param_type) in zip(&arg_values, func_def.param_types()) {
+            check_type_match(*param_type, arg_value.ty, &arg_value.span)?;
+        }
+        let call_value = self.builder.build_call(
+            func_def.func_value(),
+            &arg_values
+                .iter()
+                .map(|arg_value| arg_value.basic_value.into())
+                .collect::<Vec<_>>(),
+            "call",
+        )?;
+        Ok(Value::new(
+            call_value.try_as_basic_value().unwrap_basic(),
+            func_def.ret_type(),
+        ))
+    }
+
+    fn compile_expr(
         &self,
         expr: &Expr<'src>,
         scope: &mut Scope<'src, 'ctx>,
@@ -244,10 +280,11 @@ impl<'ctx> Compiler<'ctx> {
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
             If(cond, then, els) => self.compile_if_expr(cond, then, els, scope),
+            Call(name, args) => self.compile_call_expr(name, args, scope),
         }
     }
 
-    fn compile_var_stmt<'src>(
+    fn compile_var_stmt(
         &self,
         name: &'src str,
         ty: Type,
@@ -258,7 +295,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_assign_stmt<'src>(
+    fn compile_assign_stmt(
         &self,
         name: &Spanned<&'src str>,
         expr: &Spanned<Expr<'src>>,
@@ -272,11 +309,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(())
     }
 
-    fn compile_stmt<'src>(
-        &self,
-        stmt: &Stmt<'src>,
-        scope: &mut Scope<'src, 'ctx>,
-    ) -> Result<(), Error> {
+    fn compile_stmt(&self, stmt: &Stmt<'src>, scope: &mut Scope<'src, 'ctx>) -> Result<(), Error> {
         use Stmt::*;
         match stmt {
             Var(name, ty) => self.compile_var_stmt(name, *ty, scope),
@@ -284,7 +317,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_block<'src>(
+    fn compile_block(
         &self,
         block: &Block<'src>,
         scope: &mut Scope<'src, 'ctx>,
@@ -294,10 +327,44 @@ impl<'ctx> Compiler<'ctx> {
         }
         self.compile_expr(block.tail(), scope)
     }
+
+    fn def_iprint(&mut self) -> Result<(), Error> {
+        let printf_type = self.context.void_type().fn_type(
+            &[self.context.ptr_type(AddressSpace::default()).into()],
+            true,
+        );
+        let printf = self.module.add_function("printf", printf_type, None);
+
+        let iprint_type = self
+            .context
+            .i32_type()
+            .fn_type(&[self.context.i32_type().into()], false);
+        let iprint = self.module.add_function("iprint", iprint_type, None);
+        self.decls
+            .insert("iprint", FuncDef::new(iprint, vec![Type::I32], Type::I32));
+        let iprint_entry = self.context.append_basic_block(iprint, "entry");
+        self.builder.position_at_end(iprint_entry);
+        let param = iprint.get_nth_param(0).unwrap().into_int_value();
+        let fmt = self.builder.build_global_string_ptr("%d\n", "fmt")?;
+        self.builder.build_call(
+            printf,
+            &[fmt.as_pointer_value().into(), param.into()],
+            "printf_call",
+        )?;
+        self.builder.build_return(Some(
+            &self
+                .context
+                .i32_type()
+                .const_int(0, false)
+                .as_basic_value_enum(),
+        ))?;
+        Ok(())
+    }
 }
 
 pub fn compile<'ctx>(context: &'ctx Context, block: &Block) -> Result<Module<'ctx>, Error> {
-    let compiler = Compiler::new(context);
+    let mut compiler = Compiler::new(context);
+    compiler.def_iprint()?;
     let entry = compiler
         .context
         .append_basic_block(compiler.main_func, "entry");

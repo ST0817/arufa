@@ -20,6 +20,7 @@ mod cli;
 mod compile;
 mod emit;
 mod error;
+mod func_defs;
 mod parse;
 mod scope;
 mod token;

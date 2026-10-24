@@ -52,6 +52,7 @@ pub enum Expr<'src> {
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     Unary(Spanned<Box<Self>>, UnaryOp),
     If(Spanned<Box<Self>>, Block<'src>, Spanned<Block<'src>>),
+    Call(Spanned<&'src str>, Spanned<Vec<Spanned<Self>>>),
 }
 
 #[derive(Debug)]

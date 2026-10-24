@@ -19,7 +19,7 @@ assert() {
     $ARUFA --emit ir $path $ir_path
     $ARUFA --emit obj $path $obj_path
     $CC $obj_path -o $bin_path
-    $bin_path || actual=$?
+    $bin_path > /dev/null || actual=$?
     if [ $actual -eq $expected ]; then
         echo "[${name}] OK"
     else
@@ -32,3 +32,4 @@ assert "integer literal" ./int.arufa 42
 assert "binary expression" ./bin.arufa 13
 assert "variable" ./var.arufa 95
 assert "if" ./if.arufa 17
+assert "call" ./call.arufa 0

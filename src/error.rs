@@ -1,13 +1,50 @@
-use std::io;
+use std::{
+    fmt::{self, Display, Formatter},
+    io,
+};
 
 use chumsky::{
     error::Rich,
-    span::{SpanWrap, Spanned},
+    span::{SimpleSpan, SpanWrap, Spanned},
 };
 use inkwell::builder::BuilderError;
 use thiserror::Error;
 
 use crate::token::Token;
+
+#[derive(Debug, Clone, Copy)]
+pub enum CheckErrorKind {
+    UndefinedVariable,
+}
+
+impl Display for CheckErrorKind {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use CheckErrorKind::*;
+        match self {
+            UndefinedVariable => f.write_str("undefined variable"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CheckError {
+    kind: CheckErrorKind,
+    span: SimpleSpan,
+}
+
+impl CheckError {
+    pub fn new(kind: CheckErrorKind, span: SimpleSpan) -> Self {
+        Self { kind, span }
+    }
+
+    pub fn kind(&self) -> CheckErrorKind {
+        self.kind
+    }
+
+    pub fn span(&self) -> &SimpleSpan {
+        &self.span
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -15,12 +52,20 @@ pub enum Error {
     IO(#[from] io::Error),
     #[error("Parse error")]
     Parse(Vec<Spanned<String>>),
+    #[error("Check error")]
+    Check(CheckError),
     #[error("IR builder error: {0}")]
     Builder(#[from] BuilderError),
     #[error("IR verification error: {0}")]
     Verify(String),
     #[error("target `{triple}` is not available: {message}")]
     Target { triple: String, message: String },
+}
+
+impl From<CheckError> for Error {
+    fn from(value: CheckError) -> Self {
+        Self::Check(value)
+    }
 }
 
 impl<'src> From<Vec<Rich<'src, char>>> for Error {
@@ -34,8 +79,8 @@ impl<'src> From<Vec<Rich<'src, char>>> for Error {
     }
 }
 
-impl<'tokens> From<Vec<Rich<'tokens, Token>>> for Error {
-    fn from(value: Vec<Rich<'tokens, Token>>) -> Self {
+impl<'tokens, 'src> From<Vec<Rich<'tokens, Token<'src>>>> for Error {
+    fn from(value: Vec<Rich<'tokens, Token<'src>>>) -> Self {
         Self::Parse(
             value
                 .into_iter()

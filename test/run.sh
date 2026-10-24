@@ -30,3 +30,4 @@ assert() {
 
 assert "integer literal" ./int.arufa 42
 assert "binary expression" ./bin.arufa 13
+assert "variable" ./var.arufa 95

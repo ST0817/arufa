@@ -80,3 +80,63 @@ impl<'src> Block<'src> {
         &self.tail
     }
 }
+
+#[derive(Debug)]
+pub struct Param<'src> {
+    name: &'src str,
+    ty: Type,
+}
+
+impl<'src> Param<'src> {
+    pub fn new(name: &'src str, ty: Type) -> Self {
+        Self { name, ty }
+    }
+
+    pub fn name(&self) -> &'src str {
+        self.name
+    }
+
+    pub fn ty(&self) -> Type {
+        self.ty
+    }
+}
+
+#[derive(Debug)]
+pub struct Func<'src> {
+    name: Spanned<&'src str>,
+    paraams: Vec<Param<'src>>,
+    ret_type: Type,
+    body: Block<'src>,
+}
+
+impl<'src> Func<'src> {
+    pub fn new(
+        name: Spanned<&'src str>,
+        paraams: Vec<Param<'src>>,
+        ret_type: Type,
+        body: Block<'src>,
+    ) -> Self {
+        Self {
+            name,
+            paraams,
+            ret_type,
+            body,
+        }
+    }
+
+    pub fn name(&self) -> &Spanned<&'src str> {
+        &self.name
+    }
+
+    pub fn params(&self) -> &[Param<'src>] {
+        &self.paraams
+    }
+
+    pub fn ret_type(&self) -> Type {
+        self.ret_type
+    }
+
+    pub fn body(&self) -> &Block<'src> {
+        &self.body
+    }
+}

@@ -12,9 +12,9 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Func, Param, Stmt, Type, UnaryOp},
     error::Error,
-    token::Token::{self, *},
+    token::Token,
 };
 
 fn box_spanned<T>(value: Spanned<T>) -> Spanned<Box<T>> {
@@ -29,25 +29,29 @@ trait Parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
 trait Operator<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
     ChumskyOperator<'tokens, I, T, Err<Rich<'tokens, Token<'src>>>> + Clone;
 
-fn braces<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
+fn parens_comma<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
     parser: impl Parser<'tokens, 'src, I, T>,
-) -> impl Parser<'tokens, 'src, I, T> {
-    parser.delimited_by(just(LBrace), just(RBrace))
+) -> impl Parser<'tokens, 'src, I, Vec<T>> {
+    use Token::*;
+    parser
+        .separated_by(just(Comma))
+        .collect()
+        .delimited_by(just(LParen), just(RParen))
 }
 
 fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, &'src str> {
-    select! { Name(ident) => ident }.labelled(TextExpected::<()>::AnyIdentifier)
+    select! { Token::Name(ident) => ident }.labelled(TextExpected::<()>::AnyIdentifier)
 }
 
 fn i32_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Type> {
-    just(I32).to(Type::I32)
+    just(Token::I32).to(Type::I32)
 }
 
 fn bool_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Type> {
-    just(Bool).to(Type::Bool)
+    just(Token::Bool).to(Type::Bool)
 }
 
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
@@ -57,22 +61,24 @@ fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'to
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    select! { Int(value) => Expr::Int(value) }.labelled(TextExpected::<()>::Int)
+    select! { Token::Int(value) => Expr::Int(value) }.labelled(TextExpected::<()>::Int)
 }
 
 fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    use Token::*;
     choice((just(True).to(true), just(False).to(false))).map(Expr::Bool)
 }
 
 fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    use Token::*;
     just(If)
         .ignore_then(expr.clone().map(Box::new).spanned())
-        .then(braces(block(expr.clone())))
+        .then(block(expr.clone()))
         .then_ignore(just(Else))
-        .then(braces(block(expr).spanned()))
+        .then(block(expr).spanned())
         .map(|((cond, then), els)| Expr::If(cond, then, els))
 }
 
@@ -81,13 +87,7 @@ fn call_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     name()
         .spanned()
-        .then(
-            expr.spanned()
-                .separated_by(just(Comma))
-                .collect()
-                .delimited_by(just(LParen), just(RParen))
-                .spanned(),
-        )
+        .then(parens_comma(expr.spanned()).spanned())
         .map(|(name, args)| Expr::Call(name, args))
 }
 
@@ -126,7 +126,10 @@ fn infix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, Op: Clone + 't
 fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    use Expr::{ArithBin, CmpBin};
+    use {
+        Expr::{ArithBin, CmpBin},
+        Token::*,
+    };
     expr.spanned()
         .pratt((
             prefix_op(3, Minus, UnaryOp::Neg),
@@ -148,6 +151,7 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
 
 fn var_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
+    use Token::*;
     just(Var)
         .ignore_then(name())
         .then_ignore(just(Colon))
@@ -159,6 +163,7 @@ fn var_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
+    use Token::*;
     name()
         .spanned()
         .then_ignore(just(Assign))
@@ -176,15 +181,40 @@ fn stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
 fn block<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Block<'src>> {
+    use Token::*;
     stmt(expr.clone())
         .repeated()
         .collect()
         .then(expr.map(Box::new))
+        .delimited_by(just(LBrace), just(RBrace))
         .map(|(stmts, tail)| Block::new(stmts, tail))
 }
 
+fn param<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Param<'src>> {
+    use Token::*;
+    name()
+        .then_ignore(just(Colon))
+        .then(ty())
+        .map(|(name, ty)| Param::new(name, ty))
+}
+
+fn func<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Func<'src>> {
+    use Token::*;
+    just(Fn)
+        .ignore_then(name().spanned())
+        .then(parens_comma(param()))
+        .then_ignore(just(Arrow))
+        .then(ty())
+        .then(block(expr))
+        .map(|(((name, params), ret_type), body)| Func::new(name, params, ret_type, body))
+        .labelled("function")
+}
+
 fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Block<'src>> {
+-> impl Parser<'tokens, 'src, I, Vec<Func<'src>>> {
     let mut expr = Recursive::declare();
     expr.define({
         let atom = choice((
@@ -196,12 +226,12 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         ));
         op_expr(atom).labelled("expression")
     });
-    block(expr)
+    func(expr).repeated().collect()
 }
 
-pub fn parse<'src>(tokens: &[Spanned<Token<'src>>], src: &str) -> Result<Block<'src>, Error> {
-    let block = parser()
+pub fn parse<'src>(tokens: &[Spanned<Token<'src>>], src: &str) -> Result<Vec<Func<'src>>, Error> {
+    let funcs = parser()
         .parse(tokens.split_spanned((src.len()..src.len()).into()))
         .into_result()?;
-    Ok(block)
+    Ok(funcs)
 }

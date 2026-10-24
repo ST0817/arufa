@@ -1,4 +1,4 @@
-use std::{iter::zip, rc::Rc};
+use std::{iter::zip, path::Path, rc::Rc};
 
 use chumsky::span::{SimpleSpan, SpanWrap, Spanned};
 use inkwell::{
@@ -11,9 +11,9 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Func, Stmt, Type, UnaryOp},
     error::{CheckError, CheckErrorKind::*, Error},
-    func_defs::{FuncDef, FuncDefs},
+    func_defs::{FuncDef, FuncDefs, FuncSig},
     scope::{Scope, Var},
 };
 
@@ -45,25 +45,23 @@ impl<'ctx> Value<'ctx> {
     }
 }
 
+#[derive(Debug)]
 struct Compiler<'src, 'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
-    main_func: FunctionValue<'ctx>,
-    decls: FuncDefs<'src, 'ctx>,
+    func_defs: FuncDefs<'src, 'ctx>,
+    func_value: Option<FunctionValue<'ctx>>,
 }
 
 impl<'src, 'ctx> Compiler<'src, 'ctx> {
-    fn new(context: &'ctx Context) -> Self {
-        let module = context.create_module("main");
-        let main_type = context.i32_type().fn_type(&[], false);
-        let main_func = module.add_function("main", main_type, None);
+    fn new(context: &'ctx Context, src_path: &Path) -> Self {
         Self {
             context,
             builder: context.create_builder(),
-            module,
-            main_func,
-            decls: FuncDefs::new(),
+            module: context.create_module(&src_path.to_string_lossy()),
+            func_defs: FuncDefs::new(),
+            func_value: None,
         }
     }
 
@@ -199,9 +197,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         els: &Spanned<Block<'src>>,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        let then_block = self.context.append_basic_block(self.main_func, "then");
-        let else_block = self.context.append_basic_block(self.main_func, "else");
-        let merge_block = self.context.append_basic_block(self.main_func, "merge");
+        let func_value = self.func_value.unwrap();
+        let then_block = self.context.append_basic_block(func_value, "then");
+        let else_block = self.context.append_basic_block(func_value, "else");
+        let merge_block = self.context.append_basic_block(func_value, "merge");
 
         let cond_value = self.compile_expr(cond, scope)?;
         check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
@@ -239,21 +238,21 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         args: &Spanned<Vec<Spanned<Expr<'src>>>>,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        let Some(func_def) = self.decls.get(name) else {
+        let Some(func_def) = self.func_defs.get(name) else {
             return Err(CheckError::new(UndefinedFunction, name.span).into());
         };
-        if args.len() != func_def.param_types().len() {
+        if args.len() != func_def.sig().params().len() {
             return Err(CheckError::new(ArgNumMismatch, args.span).into());
         }
         let arg_values = args
             .iter()
             .map(|arg| Ok(self.compile_expr(arg, scope)?.with_span(arg.span)))
             .collect::<Result<Vec<Spanned<Value>>, Error>>()?;
-        for (arg_value, param_type) in zip(&arg_values, func_def.param_types()) {
+        for (arg_value, param_type) in zip(&arg_values, func_def.sig().params()) {
             check_type_match(*param_type, arg_value.ty, &arg_value.span)?;
         }
         let call_value = self.builder.build_call(
-            func_def.func_value(),
+            func_def.value(),
             &arg_values
                 .iter()
                 .map(|arg_value| arg_value.basic_value.into())
@@ -262,7 +261,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         )?;
         Ok(Value::new(
             call_value.try_as_basic_value().unwrap_basic(),
-            func_def.ret_type(),
+            func_def.sig().ret(),
         ))
     }
 
@@ -340,8 +339,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .i32_type()
             .fn_type(&[self.context.i32_type().into()], false);
         let iprint = self.module.add_function("iprint", iprint_type, None);
-        self.decls
-            .insert("iprint", FuncDef::new(iprint, vec![Type::I32], Type::I32));
+        self.func_defs.insert(
+            "iprint",
+            FuncDef::new(iprint, FuncSig::new(vec![Type::I32], Type::I32)),
+        );
         let iprint_entry = self.context.append_basic_block(iprint, "entry");
         self.builder.position_at_end(iprint_entry);
         let param = iprint.get_nth_param(0).unwrap().into_int_value();
@@ -360,18 +361,68 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         ))?;
         Ok(())
     }
+
+    fn compile_func(&mut self, func: &Func<'src>) -> Result<(), Error> {
+        let None = self.func_defs.get(func.name()) else {
+            return Err(CheckError::new(AlreadyDefined, func.name().span).into());
+        };
+        let param_types = func
+            .params()
+            .iter()
+            .map(|param| param.ty())
+            .collect::<Vec<_>>();
+        let ret_type = func.ret_type();
+        let llvm_param_types = param_types
+            .iter()
+            .map(|param_type| self.llvm_type_of(*param_type).into())
+            .collect::<Vec<_>>();
+        let llvm_ret_type = self.llvm_type_of(ret_type);
+        let llvm_func_type = llvm_ret_type.fn_type(&llvm_param_types, false);
+        let func_value = self.module.add_function(func.name(), llvm_func_type, None);
+        self.func_defs.insert(
+            func.name(),
+            FuncDef::new(func_value, FuncSig::new(param_types, ret_type)),
+        );
+        self.func_value = Some(func_value);
+
+        let mut scope = Scope::new();
+        let entry = self.context.append_basic_block(func_value, "entry");
+        self.builder.position_at_end(entry);
+
+        for (i, param) in func.params().iter().enumerate() {
+            let ptr_value = self
+                .builder
+                .build_alloca(self.llvm_type_of(param.ty()), param.name())?;
+            let basic_value = func_value.get_nth_param(i as u32).unwrap();
+            self.builder.build_store(ptr_value, basic_value)?;
+            scope.push(Var::new(param.name(), ptr_value, param.ty()));
+        }
+
+        let ret_value = self.compile_block(func.body(), &mut scope)?;
+        self.builder.build_return(Some(&ret_value.basic_value))?;
+        Ok(())
+    }
+
+    fn compile_funcs(&mut self, funcs: &[Func<'src>]) -> Result<(), Error> {
+        self.def_iprint()?;
+        for func in funcs {
+            self.compile_func(func)?;
+        }
+        if !matches!(self.func_defs.get("main"), Some(def) if *def.sig() == FuncSig::new(Vec::new(), Type::I32))
+        {
+            return Err(CheckError::new(NoMain, SimpleSpan::default()).into());
+        }
+        Ok(())
+    }
 }
 
-pub fn compile<'ctx>(context: &'ctx Context, block: &Block) -> Result<Module<'ctx>, Error> {
-    let mut compiler = Compiler::new(context);
-    compiler.def_iprint()?;
-    let entry = compiler
-        .context
-        .append_basic_block(compiler.main_func, "entry");
-    compiler.builder.position_at_end(entry);
-    let mut scope = Scope::new();
-    let value = compiler.compile_block(block, &mut scope)?;
-    compiler.builder.build_return(Some(&value.basic_value))?;
+pub fn compile<'src, 'ctx>(
+    context: &'ctx Context,
+    src_path: &Path,
+    funcs: &[Func<'src>],
+) -> Result<Module<'ctx>, Error> {
+    let mut compiler = Compiler::new(context, src_path);
+    compiler.compile_funcs(funcs)?;
     compiler
         .module
         .verify()

@@ -21,12 +21,13 @@ fn tokenizer<'src>()
         .to_slice();
     let symbols = choice((
         just('+').to(Plus),
+        just("->").to(Arrow),
         just('-').to(Minus),
         just('*').to(Star),
         just('/').to(Slash),
         just('%').to(Perc),
-        just('=').to(Assign),
         just("==").to(Eq),
+        just('=').to(Assign),
         just('<').to(LT),
         just("<=").to(LE),
         just('>').to(GT),
@@ -49,6 +50,7 @@ fn tokenizer<'src>()
         keyword("if").to(If),
         keyword("else").to(Else),
         keyword("var").to(Var),
+        keyword("fn").to(Fn),
     ));
     choice((symbols, keywords, int.map(Int), name.map(Name)))
         .spanned()

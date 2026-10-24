@@ -18,6 +18,8 @@ pub enum CheckErrorKind {
     TypeMismatch { expected: Type, found: Type },
     UndefinedFunction,
     ArgNumMismatch,
+    AlreadyDefined,
+    NoMain,
 }
 
 impl Display for CheckErrorKind {
@@ -30,6 +32,8 @@ impl Display for CheckErrorKind {
             }
             UndefinedFunction => f.write_str("undefined function"),
             ArgNumMismatch => f.write_str("the number of arguments does not match"),
+            AlreadyDefined => f.write_str("already defined"),
+            NoMain => f.write_str("no main function"),
         }
     }
 }

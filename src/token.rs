@@ -3,12 +3,13 @@ use std::fmt::{self, Display, Formatter, Write};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
     Plus,
+    Arrow,
     Minus,
     Star,
     Slash,
     Perc,
-    Assign,
     Eq,
+    Assign,
     LT,
     LE,
     GT,
@@ -29,6 +30,7 @@ pub enum Token<'src> {
     If,
     Else,
     Var,
+    Fn,
     Int(u32),
     Name(&'src str),
 }
@@ -38,12 +40,13 @@ impl Display for Token<'_> {
         use Token::*;
         match self {
             Plus => f.write_char('+'),
+            Arrow => f.write_str("->"),
             Minus => f.write_char('-'),
             Star => f.write_char('*'),
             Slash => f.write_char('/'),
             Perc => f.write_char('%'),
-            Assign => f.write_char('='),
             Eq => f.write_str("=="),
+            Assign => f.write_char('='),
             LT => f.write_char('<'),
             LE => f.write_str("<="),
             GT => f.write_char('>'),
@@ -64,6 +67,7 @@ impl Display for Token<'_> {
             If => f.write_str("if"),
             Else => f.write_str("else"),
             Var => f.write_str("var"),
+            Fn => f.write_str("fn"),
             Int(value) => write!(f, "{value}"),
             Name(name) => f.write_str(name),
         }

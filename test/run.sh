@@ -33,3 +33,4 @@ assert "binary expression" ./bin.arufa 13
 assert "variable" ./var.arufa 95
 assert "if" ./if.arufa 17
 assert "call" ./call.arufa 0
+assert "function" ./func.arufa 120

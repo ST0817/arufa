@@ -1,6 +1,6 @@
 #![feature(trait_alias)]
 
-use std::{fs::File, io::Read, process::ExitCode};
+use std::{fs::File, io::Read, path::Path, process::ExitCode};
 
 use ariadne::{Color, Config, IndexType, Label, Report, ReportKind, Source};
 use chumsky::span::Spanned;
@@ -26,12 +26,12 @@ mod scope;
 mod token;
 mod tokenize;
 
-fn run(cli: &Cli, src: &mut String) -> Result<(), Error> {
+fn run(cli: &Cli, src: &mut String, src_path: &Path) -> Result<(), Error> {
     File::open(cli.src_path())?.read_to_string(src)?;
     let tokens = tokenize(src)?;
-    let block = parse(&tokens, src)?;
+    let funcs = parse(&tokens, src)?;
     let context = Context::create();
-    let module = compile(&context, &block)?;
+    let module = compile(&context, src_path, &funcs)?;
     emit(cli, &module)?;
     Ok(())
 }
@@ -69,7 +69,7 @@ fn report_check_error(error: &CheckError, id: &str, src: &str) {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let mut src = String::new();
-    match run(&cli, &mut src) {
+    match run(&cli, &mut src, cli.src_path()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(Error::Parse(errors)) => {
             report_parse_errors(&errors, &cli.src_path().to_string_lossy(), &src);

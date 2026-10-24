@@ -4,52 +4,63 @@ use inkwell::values::FunctionValue;
 
 use crate::ast::Type;
 
+#[derive(Debug, PartialEq)]
+pub struct FuncSig {
+    params: Vec<Type>,
+    ret: Type,
+}
+
+impl FuncSig {
+    pub fn new(params: Vec<Type>, ret: Type) -> Self {
+        Self { params, ret }
+    }
+
+    pub fn params(&self) -> &[Type] {
+        &self.params
+    }
+
+    pub fn ret(&self) -> Type {
+        self.ret
+    }
+}
+
 #[derive(Debug)]
 pub struct FuncDef<'ctx> {
-    func_value: FunctionValue<'ctx>,
-    param_types: Vec<Type>,
-    ret_type: Type,
+    value: FunctionValue<'ctx>,
+    sig: FuncSig,
 }
 
 impl<'ctx> FuncDef<'ctx> {
-    pub fn new(func_value: FunctionValue<'ctx>, param_types: Vec<Type>, ret_type: Type) -> Self {
-        Self {
-            func_value,
-            param_types,
-            ret_type,
-        }
+    pub fn new(value: FunctionValue<'ctx>, sig: FuncSig) -> Self {
+        Self { value, sig }
     }
 
-    pub fn func_value(&self) -> FunctionValue<'ctx> {
-        self.func_value
+    pub fn value(&self) -> FunctionValue<'ctx> {
+        self.value
     }
 
-    pub fn param_types(&self) -> &[Type] {
-        &self.param_types
-    }
-
-    pub fn ret_type(&self) -> Type {
-        self.ret_type
+    pub fn sig(&self) -> &FuncSig {
+        &self.sig
     }
 }
 
 #[derive(Debug)]
 pub struct FuncDefs<'src, 'ctx> {
-    func_defs: HashMap<&'src str, FuncDef<'ctx>>,
+    defs: HashMap<&'src str, FuncDef<'ctx>>,
 }
 
 impl<'src, 'ctx> FuncDefs<'src, 'ctx> {
     pub fn new() -> Self {
         Self {
-            func_defs: HashMap::new(),
+            defs: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, name: &'src str, func_def: FuncDef<'ctx>) {
-        self.func_defs.insert(name, func_def);
+    pub fn insert(&mut self, name: &'src str, def: FuncDef<'ctx>) {
+        self.defs.insert(name, def);
     }
 
     pub fn get(&self, name: &str) -> Option<&FuncDef<'ctx>> {
-        self.func_defs.get(name)
+        self.defs.get(name)
     }
 }

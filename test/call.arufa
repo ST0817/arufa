@@ -1,6 +1,10 @@
+fn bye() {
+    print("Good bye.");
+}
+
 fn main() -> i32 {
-    var x: i32;
-    x = iprint(42);
-    x = print("Hello world!");
-    x
+    iprint(42);
+    print("Hello world!");
+    bye();
+    0
 }

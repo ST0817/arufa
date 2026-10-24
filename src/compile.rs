@@ -74,7 +74,13 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                 .context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
+            Unit => self.context.struct_type(&[], false).as_basic_type_enum(),
         }
+    }
+
+    fn unit_value(&self) -> Value<'ctx> {
+        let basic_value = self.context.const_struct(&[], false).as_basic_value_enum();
+        Value::new(basic_value, Type::Unit)
     }
 
     fn compile_int_expr(&self, value: u32) -> Result<Value<'ctx>, Error> {
@@ -98,6 +104,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn compile_str_expr(&self, value: &'src str) -> Result<Value<'ctx>, Error> {
         let global_value = self.builder.build_global_string_ptr(value, "str")?;
         Ok(Value::new(global_value.as_basic_value_enum(), Type::Str))
+    }
+
+    fn compile_unit_expr(&self) -> Result<Value<'ctx>, Error> {
+        Ok(self.unit_value())
     }
 
     fn compile_var_expr(
@@ -202,43 +212,64 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn compile_if_expr(
         &self,
         cond: &Spanned<Box<Expr<'src>>>,
-        then: &Block<'src>,
-        els: &Spanned<Block<'src>>,
+        then: &Spanned<Block<'src>>,
+        els: Option<&Spanned<Block<'src>>>,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
         let func_value = self.func_value.unwrap();
-        let then_block = self.context.append_basic_block(func_value, "then");
-        let else_block = self.context.append_basic_block(func_value, "else");
-        let merge_block = self.context.append_basic_block(func_value, "merge");
 
-        let cond_value = self.compile_expr(cond, scope)?;
-        check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
-        self.builder.build_conditional_branch(
-            cond_value.basic_value.into_int_value(),
-            then_block,
-            else_block,
-        )?;
+        if let Some(els) = els {
+            let then_block = self.context.append_basic_block(func_value, "then");
+            let else_block = self.context.append_basic_block(func_value, "else");
+            let merge_block = self.context.append_basic_block(func_value, "merge");
 
-        self.builder.position_at_end(then_block);
-        let then_value = self.compile_block(then, scope)?;
-        self.builder.build_unconditional_branch(merge_block)?;
-        let then_end = self.builder.get_insert_block().unwrap();
+            let cond_value = self.compile_expr(cond, scope)?;
+            check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
+            self.builder.build_conditional_branch(
+                cond_value.basic_value.into_int_value(),
+                then_block,
+                else_block,
+            )?;
 
-        self.builder.position_at_end(else_block);
-        let else_value = self.compile_block(els, scope)?;
-        check_type_match(then_value.ty, else_value.ty, &els.span)?;
-        self.builder.build_unconditional_branch(merge_block)?;
-        let else_end = self.builder.get_insert_block().unwrap();
+            self.builder.position_at_end(then_block);
+            let then_value = self.compile_block(then, scope)?;
+            self.builder.build_unconditional_branch(merge_block)?;
+            let then_end = self.builder.get_insert_block().unwrap();
 
-        self.builder.position_at_end(merge_block);
-        let ty = then_value.ty;
-        let phi = self.builder.build_phi(self.llvm_type_of(ty), "if")?;
-        phi.add_incoming(&[
-            (&then_value.basic_value, then_end),
-            (&else_value.basic_value, else_end),
-        ]);
+            self.builder.position_at_end(else_block);
+            let else_value = self.compile_block(els, scope)?;
+            check_type_match(then_value.ty, else_value.ty, &els.span)?;
+            self.builder.build_unconditional_branch(merge_block)?;
+            let else_end = self.builder.get_insert_block().unwrap();
 
-        Ok(Value::new(phi.as_basic_value(), ty))
+            self.builder.position_at_end(merge_block);
+            let ty = then_value.ty;
+            let phi = self.builder.build_phi(self.llvm_type_of(ty), "if")?;
+            phi.add_incoming(&[
+                (&then_value.basic_value, then_end),
+                (&else_value.basic_value, else_end),
+            ]);
+            Ok(Value::new(phi.as_basic_value(), ty))
+        } else {
+            let then_block = self.context.append_basic_block(func_value, "then");
+            let merge_block = self.context.append_basic_block(func_value, "merge");
+
+            let cond_value = self.compile_expr(cond, scope)?;
+            check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
+            self.builder.build_conditional_branch(
+                cond_value.basic_value.into_int_value(),
+                then_block,
+                merge_block,
+            )?;
+
+            self.builder.position_at_end(then_block);
+            let then_value = self.compile_block(then, scope)?;
+            check_type_match(Type::Unit, then_value.ty, &then.span)?;
+            self.builder.build_unconditional_branch(merge_block)?;
+
+            self.builder.position_at_end(merge_block);
+            Ok(self.unit_value())
+        }
     }
 
     fn compile_call_expr(
@@ -284,11 +315,12 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Int(value) => self.compile_int_expr(*value),
             Bool(value) => self.compile_bool_expr(*value),
             Str(value) => self.compile_str_expr(value),
+            Unit => self.compile_unit_expr(),
             Var(name) => self.compile_var_expr(name, scope),
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
-            If(cond, then, els) => self.compile_if_expr(cond, then, els, scope),
+            If(cond, then, els) => self.compile_if_expr(cond, then, els.as_ref(), scope),
             Call(name, args) => self.compile_call_expr(name, args, scope),
         }
     }
@@ -318,11 +350,21 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         Ok(())
     }
 
+    fn compile_expr_stmt(
+        &self,
+        expr: &Expr<'src>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<(), Error> {
+        self.compile_expr(expr, scope)?;
+        Ok(())
+    }
+
     fn compile_stmt(&self, stmt: &Stmt<'src>, scope: &mut Scope<'src, 'ctx>) -> Result<(), Error> {
         use Stmt::*;
         match stmt {
             Var(name, ty) => self.compile_var_stmt(name, *ty, scope),
             Assign(name, expr) => self.compile_assign_stmt(name, expr, scope),
+            Expr(expr) => self.compile_expr_stmt(expr, scope),
         }
     }
 
@@ -334,7 +376,11 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         for stmt in block.stmts() {
             self.compile_stmt(stmt, scope)?;
         }
-        self.compile_expr(block.tail(), scope)
+        if let Some(tail) = block.tail() {
+            self.compile_expr(tail, scope)
+        } else {
+            Ok(self.unit_value())
+        }
     }
 
     fn def_print(&mut self) -> Result<(), Error> {
@@ -412,7 +458,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .iter()
             .map(|param| param.ty())
             .collect::<Vec<_>>();
-        let ret_type = func.ret_type();
+        let ret_type = func.ret_type().unwrap_or(Type::Unit);
         let llvm_param_types = param_types
             .iter()
             .map(|param_type| self.llvm_type_of(*param_type).into())
@@ -450,6 +496,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         for func in funcs {
             self.compile_func(func)?;
         }
+
         if !matches!(self.func_defs.get("main"), Some(def) if *def.sig() == FuncSig::new(Vec::new(), Type::I32))
         {
             return Err(CheckError::new(NoMain, SimpleSpan::default()).into());

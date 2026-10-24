@@ -7,6 +7,7 @@ pub enum Type {
     I32,
     Bool,
     Str,
+    Unit,
 }
 
 impl Display for Type {
@@ -16,6 +17,7 @@ impl Display for Type {
             I32 => f.write_str("i32"),
             Bool => f.write_str("bool"),
             Str => f.write_str("str"),
+            Unit => f.write_str("()"),
         }
     }
 }
@@ -50,11 +52,16 @@ pub enum Expr<'src> {
     Int(u32),
     Bool(bool),
     Str(&'src str),
+    Unit,
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     Unary(Spanned<Box<Self>>, UnaryOp),
-    If(Spanned<Box<Self>>, Block<'src>, Spanned<Block<'src>>),
+    If(
+        Spanned<Box<Self>>,
+        Spanned<Block<'src>>,
+        Option<Spanned<Block<'src>>>,
+    ),
     Call(Spanned<&'src str>, Spanned<Vec<Spanned<Self>>>),
 }
 
@@ -62,16 +69,17 @@ pub enum Expr<'src> {
 pub enum Stmt<'src> {
     Var(&'src str, Type),
     Assign(Spanned<&'src str>, Spanned<Expr<'src>>),
+    Expr(Expr<'src>),
 }
 
 #[derive(Debug)]
 pub struct Block<'src> {
     stmts: Vec<Stmt<'src>>,
-    tail: Box<Expr<'src>>,
+    tail: Option<Box<Expr<'src>>>,
 }
 
 impl<'src> Block<'src> {
-    pub fn new(stmts: Vec<Stmt<'src>>, tail: Box<Expr<'src>>) -> Self {
+    pub fn new(stmts: Vec<Stmt<'src>>, tail: Option<Box<Expr<'src>>>) -> Self {
         Self { stmts, tail }
     }
 
@@ -79,8 +87,8 @@ impl<'src> Block<'src> {
         &self.stmts
     }
 
-    pub fn tail(&self) -> &Expr<'src> {
-        &self.tail
+    pub fn tail(&self) -> Option<&Expr<'src>> {
+        self.tail.as_deref()
     }
 }
 
@@ -108,7 +116,7 @@ impl<'src> Param<'src> {
 pub struct Func<'src> {
     name: Spanned<&'src str>,
     paraams: Vec<Param<'src>>,
-    ret_type: Type,
+    ret_type: Option<Type>,
     body: Block<'src>,
 }
 
@@ -116,7 +124,7 @@ impl<'src> Func<'src> {
     pub fn new(
         name: Spanned<&'src str>,
         paraams: Vec<Param<'src>>,
-        ret_type: Type,
+        ret_type: Option<Type>,
         body: Block<'src>,
     ) -> Self {
         Self {
@@ -135,7 +143,7 @@ impl<'src> Func<'src> {
         &self.paraams
     }
 
-    pub fn ret_type(&self) -> Type {
+    pub fn ret_type(&self) -> Option<Type> {
         self.ret_type
     }
 

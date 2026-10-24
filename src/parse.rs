@@ -14,7 +14,7 @@ use chumsky::{
 use crate::{
     ast::{ArithBinOp, Block, CmpBinOp, Expr, Func, Param, Stmt, Type, UnaryOp},
     error::Error,
-    token::Token,
+    token::Token::{self, LParen, RParen},
 };
 
 fn box_spanned<T>(value: Spanned<T>) -> Spanned<Box<T>> {
@@ -54,9 +54,14 @@ fn bool_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     just(Token::Bool).to(Type::Bool)
 }
 
+fn unit_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Type> {
+    just(LParen).ignore_then(just(RParen)).to(Type::Unit)
+}
+
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
-    choice((i32_type(), bool_type())).labelled("type")
+    choice((i32_type(), bool_type(), unit_type())).labelled("type")
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -75,15 +80,20 @@ fn str_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     select! { Token::Str(value) => Expr::Str(value) }
 }
 
+fn unit_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    just(LParen).ignore_then(just(RParen)).map(|_| Expr::Unit)
+}
+
 fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     use Token::*;
+    let else_clause = just(Else).ignore_then(block(expr.clone()).spanned());
     just(If)
         .ignore_then(expr.clone().map(Box::new).spanned())
-        .then(block(expr.clone()))
-        .then_ignore(just(Else))
         .then(block(expr).spanned())
+        .then(else_clause.or_not())
         .map(|((cond, then), els)| Expr::If(cond, then, els))
 }
 
@@ -177,10 +187,16 @@ fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         .then_ignore(just(Semic))
 }
 
+fn expr_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
+    expr.map(Stmt::Expr).then_ignore(just(Token::Semic))
+}
+
 fn stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
-    choice((var_stmt(), assign_stmt(expr))).labelled("statement")
+    choice((var_stmt(), assign_stmt(expr.clone()), expr_stmt(expr))).labelled("statement")
 }
 
 fn block<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
@@ -190,7 +206,7 @@ fn block<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     stmt(expr.clone())
         .repeated()
         .collect()
-        .then(expr.map(Box::new))
+        .then(expr.map(Box::new).or_not())
         .delimited_by(just(LBrace), just(RBrace))
         .map(|(stmts, tail)| Block::new(stmts, tail))
 }
@@ -211,8 +227,7 @@ fn func<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     just(Fn)
         .ignore_then(name().spanned())
         .then(parens_comma(param()))
-        .then_ignore(just(Arrow))
-        .then(ty())
+        .then(just(Arrow).ignore_then(ty()).or_not())
         .then(block(expr))
         .map(|(((name, params), ret_type), body)| Func::new(name, params, ret_type, body))
         .labelled("function")
@@ -226,6 +241,7 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
             int_expr(),
             bool_expr(),
             str_expr(),
+            unit_expr(),
             if_expr(expr.clone()),
             call_expr(expr.clone()),
             var_expr(),

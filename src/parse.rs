@@ -29,6 +29,12 @@ trait Parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
 trait Operator<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
     ChumskyOperator<'tokens, I, T, Err<Rich<'tokens, Token<'src>>>> + Clone;
 
+fn braces<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
+    parser: impl Parser<'tokens, 'src, I, T>,
+) -> impl Parser<'tokens, 'src, I, T> {
+    parser.delimited_by(just(LBrace), just(RBrace))
+}
+
 fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, &'src str> {
     select! { Name(ident) => ident }.labelled(TextExpected::<()>::AnyIdentifier)
@@ -57,6 +63,17 @@ fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     choice((just(True).to(true), just(False).to(false))).map(Expr::Bool)
+}
+
+fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    just(If)
+        .ignore_then(expr.clone().map(Box::new).spanned())
+        .then(braces(block(expr.clone())))
+        .then_ignore(just(Else))
+        .then(braces(block(expr).spanned()))
+        .map(|((cond, then), els)| Expr::If(cond, then, els))
 }
 
 fn var_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -91,7 +108,7 @@ fn infix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, Op: Clone + 't
     )
 }
 
-fn bin_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     use Expr::{ArithBin, CmpBin};
@@ -114,16 +131,6 @@ fn bin_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         .map(|spanned| spanned.inner)
 }
 
-fn expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    let mut expr = Recursive::declare();
-    expr.define({
-        let atom = choice((int_expr(), bool_expr(), var_expr()));
-        bin_expr(atom)
-    });
-    expr.labelled("expression")
-}
-
 fn var_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
     just(Var)
@@ -134,33 +141,46 @@ fn var_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         .then_ignore(just(Semic))
 }
 
-fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Stmt<'src>> {
+fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
     name()
         .spanned()
         .then_ignore(just(Assign))
-        .then(expr().spanned())
+        .then(expr.spanned())
         .map(|(name, expr)| Stmt::Assign(name, expr))
         .then_ignore(just(Semic))
 }
 
-fn stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Stmt<'src>> {
-    choice((var_stmt(), assign_stmt())).labelled("statement")
+fn stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
+    choice((var_stmt(), assign_stmt(expr))).labelled("statement")
 }
 
-fn block<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Block<'src>> {
-    stmt()
+fn block<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Block<'src>> {
+    stmt(expr.clone())
         .repeated()
         .collect()
-        .then(expr())
+        .then(expr.map(Box::new))
         .map(|(stmts, tail)| Block::new(stmts, tail))
 }
 
+fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Block<'src>> {
+    let mut expr = Recursive::declare();
+    expr.define({
+        let atom = choice((int_expr(), bool_expr(), if_expr(expr.clone()), var_expr()));
+        op_expr(atom).labelled("expression")
+    });
+    block(expr)
+}
+
 pub fn parse<'src>(tokens: &[Spanned<Token<'src>>], src: &str) -> Result<Block<'src>, Error> {
-    let expr = block()
+    let block = parser()
         .parse(tokens.split_spanned((src.len()..src.len()).into()))
         .into_result()?;
-    Ok(expr)
+    Ok(block)
 }

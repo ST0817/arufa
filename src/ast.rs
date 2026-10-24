@@ -51,6 +51,7 @@ pub enum Expr<'src> {
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     Unary(Spanned<Box<Self>>, UnaryOp),
+    If(Spanned<Box<Self>>, Block<'src>, Spanned<Block<'src>>),
 }
 
 #[derive(Debug)]
@@ -62,11 +63,11 @@ pub enum Stmt<'src> {
 #[derive(Debug)]
 pub struct Block<'src> {
     stmts: Vec<Stmt<'src>>,
-    tail: Expr<'src>,
+    tail: Box<Expr<'src>>,
 }
 
 impl<'src> Block<'src> {
-    pub fn new(stmts: Vec<Stmt<'src>>, tail: Expr<'src>) -> Self {
+    pub fn new(stmts: Vec<Stmt<'src>>, tail: Box<Expr<'src>>) -> Self {
         Self { stmts, tail }
     }
 

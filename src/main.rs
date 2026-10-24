@@ -8,7 +8,7 @@ use inkwell::context::Context;
 
 use crate::{
     cli::Cli,
-    compile::Compiler,
+    compile::compile,
     emit::emit,
     error::{CheckError, Error},
     parse::parse,
@@ -30,8 +30,7 @@ fn run(cli: &Cli, src: &mut String) -> Result<(), Error> {
     let tokens = tokenize(src)?;
     let block = parse(&tokens, src)?;
     let context = Context::create();
-    let compiler = Compiler::new(&context);
-    let module = compiler.compile(&block)?;
+    let module = compile(&context, &block)?;
     emit(cli, &module)?;
     Ok(())
 }

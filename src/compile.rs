@@ -6,7 +6,8 @@ use inkwell::{
     builder::Builder,
     context::Context,
     module::Module,
-    values::{BasicValue, BasicValueEnum},
+    types::{BasicType, BasicTypeEnum},
+    values::{BasicValue, BasicValueEnum, FunctionValue},
 };
 
 use crate::{
@@ -43,16 +44,31 @@ impl<'ctx> Value<'ctx> {
     }
 }
 
-pub struct Compiler<'ctx> {
+struct Compiler<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
+    module: Module<'ctx>,
+    main_func: FunctionValue<'ctx>,
 }
 
 impl<'ctx> Compiler<'ctx> {
-    pub fn new(context: &'ctx Context) -> Self {
+    fn new(context: &'ctx Context) -> Self {
+        let module = context.create_module("main");
+        let main_type = context.i32_type().fn_type(&[], false);
+        let main_func = module.add_function("main", main_type, None);
         Self {
             context,
             builder: context.create_builder(),
+            module,
+            main_func,
+        }
+    }
+
+    fn llvm_type_of(&self, ty: Type) -> BasicTypeEnum<'ctx> {
+        use Type::*;
+        match ty {
+            I32 => self.context.i32_type().as_basic_type_enum(),
+            Bool => self.context.bool_type().as_basic_type_enum(),
         }
     }
 
@@ -173,6 +189,47 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
+    fn compile_if_expr<'src>(
+        &self,
+        cond: &Spanned<Box<Expr<'src>>>,
+        then: &Block<'src>,
+        els: &Spanned<Block<'src>>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        let then_block = self.context.append_basic_block(self.main_func, "then");
+        let else_block = self.context.append_basic_block(self.main_func, "else");
+        let merge_block = self.context.append_basic_block(self.main_func, "merge");
+
+        let cond_value = self.compile_expr(cond, scope)?;
+        check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
+        self.builder.build_conditional_branch(
+            cond_value.basic_value.into_int_value(),
+            then_block,
+            else_block,
+        )?;
+
+        self.builder.position_at_end(then_block);
+        let then_value = self.compile_block(then, scope)?;
+        self.builder.build_unconditional_branch(merge_block)?;
+        let then_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(else_block);
+        let else_value = self.compile_block(els, scope)?;
+        check_type_match(then_value.ty, else_value.ty, &els.span)?;
+        self.builder.build_unconditional_branch(merge_block)?;
+        let else_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(merge_block);
+        let ty = then_value.ty;
+        let phi = self.builder.build_phi(self.llvm_type_of(ty), "if")?;
+        phi.add_incoming(&[
+            (&then_value.basic_value, then_end),
+            (&else_value.basic_value, else_end),
+        ]);
+
+        Ok(Value::new(phi.as_basic_value(), ty))
+    }
+
     fn compile_expr<'src>(
         &self,
         expr: &Expr<'src>,
@@ -186,6 +243,7 @@ impl<'ctx> Compiler<'ctx> {
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
+            If(cond, then, els) => self.compile_if_expr(cond, then, els, scope),
         }
     }
 
@@ -236,19 +294,20 @@ impl<'ctx> Compiler<'ctx> {
         }
         self.compile_expr(block.tail(), scope)
     }
+}
 
-    pub fn compile(&self, block: &Block) -> Result<Module<'ctx>, Error> {
-        let module = self.context.create_module("main");
-        let main_type = self.context.i32_type().fn_type(&[], false);
-        let main = module.add_function("main", main_type, None);
-        let entry = self.context.append_basic_block(main, "entry");
-        self.builder.position_at_end(entry);
-        let mut scope = Scope::new();
-        let value = self.compile_block(block, &mut scope)?;
-        self.builder.build_return(Some(&value.basic_value))?;
-        module
-            .verify()
-            .map_err(|error| Error::Verify(error.to_string()))?;
-        Ok(module)
-    }
+pub fn compile<'ctx>(context: &'ctx Context, block: &Block) -> Result<Module<'ctx>, Error> {
+    let compiler = Compiler::new(context);
+    let entry = compiler
+        .context
+        .append_basic_block(compiler.main_func, "entry");
+    compiler.builder.position_at_end(entry);
+    let mut scope = Scope::new();
+    let value = compiler.compile_block(block, &mut scope)?;
+    compiler.builder.build_return(Some(&value.basic_value))?;
+    compiler
+        .module
+        .verify()
+        .map_err(|error| Error::Verify(error.to_string()))?;
+    Ok(compiler.module)
 }

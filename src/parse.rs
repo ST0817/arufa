@@ -3,7 +3,7 @@ use chumsky::{
     error::Rich,
     extra::Err,
     input::{Input, ValueInput},
-    pratt::{infix, left},
+    pratt::{Associativity, Operator as ChumskyOperator, infix, left, prefix},
     primitive::{choice, just},
     recursive::Recursive,
     select,
@@ -12,7 +12,7 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{BinOp, Block, Expr, Stmt, Type},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Stmt, Type, UnaryOp},
     error::Error,
     token::Token::{self, *},
 };
@@ -25,6 +25,9 @@ trait InputBound<'tokens, 'src> = ValueInput<'tokens, Token = Token<'src>, Span 
 
 trait Parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
     ChumskyParser<'tokens, I, T, Err<Rich<'tokens, Token<'src>>>> + Clone;
+
+trait Operator<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
+    ChumskyOperator<'tokens, I, T, Err<Rich<'tokens, Token<'src>>>> + Clone;
 
 fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, &'src str> {
@@ -61,25 +64,52 @@ fn var_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     name().spanned().map(Expr::Var)
 }
 
+fn prefix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    prec: u16,
+    op_token: Token<'src>,
+    op: UnaryOp,
+) -> impl Operator<'tokens, 'src, I, Spanned<Expr<'src>>> {
+    prefix(
+        prec,
+        just(op_token).to(op).labelled("prefix operator"),
+        |op, expr, extra| Expr::Unary(box_spanned(expr), op).with_span(extra.span()),
+    )
+}
+
+fn infix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, Op: Clone + 'tokens>(
+    assoc: Associativity,
+    op_token: Token<'src>,
+    op: Op,
+    map: impl Fn(Spanned<Box<Expr<'src>>>, Op, Spanned<Box<Expr<'src>>>) -> Expr<'src> + Clone,
+) -> impl Operator<'tokens, 'src, I, Spanned<Expr<'src>>> {
+    infix(
+        assoc,
+        just(op_token).to(op).labelled("binary operator"),
+        move |lhs, op, rhs, extra| {
+            map(box_spanned(lhs), op, box_spanned(rhs)).with_span(extra.span())
+        },
+    )
+}
+
 fn bin_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    let infix_left = |prec, op_token, op| {
-        infix(
-            left(prec),
-            just(op_token).to(op).labelled("binary operator"),
-            |lhs, op, rhs, extra| {
-                Expr::Bin(box_spanned(lhs), op, box_spanned(rhs)).with_span(extra.span())
-            },
-        )
-    };
+    use Expr::{ArithBin, CmpBin};
     expr.spanned()
         .pratt((
-            infix_left(1, Star, BinOp::Mul),
-            infix_left(1, Slash, BinOp::Div),
-            infix_left(1, Perc, BinOp::Mod),
-            infix_left(0, Plus, BinOp::Add),
-            infix_left(0, Minus, BinOp::Sub),
+            prefix_op(3, Minus, UnaryOp::Neg),
+            prefix_op(3, Not, UnaryOp::Not),
+            infix_op(left(2), Star, ArithBinOp::Mul, ArithBin),
+            infix_op(left(2), Slash, ArithBinOp::Div, ArithBin),
+            infix_op(left(2), Perc, ArithBinOp::Mod, ArithBin),
+            infix_op(left(1), Plus, ArithBinOp::Add, ArithBin),
+            infix_op(left(1), Minus, ArithBinOp::Sub, ArithBin),
+            infix_op(left(0), Eq, CmpBinOp::Eq, CmpBin),
+            infix_op(left(0), NotEq, CmpBinOp::NotEq, CmpBin),
+            infix_op(left(0), LT, CmpBinOp::LT, CmpBin),
+            infix_op(left(0), LE, CmpBinOp::LE, CmpBin),
+            infix_op(left(0), GT, CmpBinOp::GT, CmpBin),
+            infix_op(left(0), GE, CmpBinOp::GE, CmpBin),
         ))
         .map(|spanned| spanned.inner)
 }
@@ -108,7 +138,7 @@ fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
     name()
         .spanned()
-        .then_ignore(just(Eq))
+        .then_ignore(just(Assign))
         .then(expr().spanned())
         .map(|(name, expr)| Stmt::Assign(name, expr))
         .then_ignore(just(Semic))

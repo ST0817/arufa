@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use chumsky::span::{SimpleSpan, Spanned};
 use inkwell::{
+    IntPredicate,
     builder::Builder,
     context::Context,
     module::Module,
@@ -9,7 +10,7 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{BinOp, Block, Expr, Stmt, Type},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Stmt, Type, UnaryOp},
     error::{CheckError, CheckErrorKind::*, Error},
     scope::{Scope, Var},
 };
@@ -85,14 +86,14 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(basic_value, var.ty()))
     }
 
-    fn compile_bin_expr<'src>(
+    fn compile_arith_bin_expr<'src>(
         &self,
         lhs: &Spanned<Box<Expr<'src>>>,
-        op: BinOp,
+        op: ArithBinOp,
         rhs: &Spanned<Box<Expr<'src>>>,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        use BinOp::*;
+        use ArithBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
@@ -119,6 +120,59 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Value::new(int_value.into(), Type::I32))
     }
 
+    fn compile_cmp_bin_expr<'src>(
+        &self,
+        lhs: &Spanned<Box<Expr<'src>>>,
+        op: CmpBinOp,
+        rhs: &Spanned<Box<Expr<'src>>>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        use CmpBinOp::*;
+        let lhs_value = self.compile_expr(lhs, scope)?;
+        let lhs_int_value = lhs_value.basic_value.into_int_value();
+        check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        let rhs_value = self.compile_expr(rhs, scope)?;
+        check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
+        let rhs_int_value = rhs_value.basic_value.into_int_value();
+        let int_value = self.builder.build_int_compare(
+            match op {
+                Eq => IntPredicate::EQ,
+                NotEq => IntPredicate::NE,
+                LT => IntPredicate::SLT,
+                LE => IntPredicate::SLE,
+                GT => IntPredicate::SGT,
+                GE => IntPredicate::SGE,
+            },
+            lhs_int_value,
+            rhs_int_value,
+            "cmp",
+        )?;
+        Ok(Value::new(int_value.into(), Type::Bool))
+    }
+
+    fn compile_unary_expr<'src>(
+        &self,
+        expr: &Spanned<Box<Expr<'src>>>,
+        op: UnaryOp,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        use UnaryOp::*;
+        let expr_value = self.compile_expr(expr, scope)?;
+        let expr_int_value = expr_value.basic_value.into_int_value();
+        match op {
+            Neg => {
+                check_type_match(Type::I32, expr_value.ty, &expr.span)?;
+                let int_value = self.builder.build_int_neg(expr_int_value, "neg")?;
+                Ok(Value::new(int_value.into(), Type::I32))
+            }
+            Not => {
+                check_type_match(Type::Bool, expr_value.ty, &expr.span)?;
+                let int_value = self.builder.build_not(expr_int_value, "not")?;
+                Ok(Value::new(int_value.into(), Type::Bool))
+            }
+        }
+    }
+
     fn compile_expr<'src>(
         &self,
         expr: &Expr<'src>,
@@ -129,7 +183,9 @@ impl<'ctx> Compiler<'ctx> {
             Int(value) => self.compile_int_expr(*value),
             Bool(value) => self.compile_bool_expr(*value),
             Var(name) => self.compile_var_expr(name, scope),
-            Bin(lhs, op, rhs) => self.compile_bin_expr(lhs, *op, rhs, scope),
+            ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
+            CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
+            Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
         }
     }
 

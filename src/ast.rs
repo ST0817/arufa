@@ -19,7 +19,7 @@ impl Display for Type {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum BinOp {
+pub enum ArithBinOp {
     Add,
     Sub,
     Mul,
@@ -27,12 +27,30 @@ pub enum BinOp {
     Mod,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CmpBinOp {
+    Eq,
+    NotEq,
+    LT,
+    LE,
+    GT,
+    GE,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+}
+
 #[derive(Debug)]
 pub enum Expr<'src> {
     Int(u32),
     Bool(bool),
     Var(Spanned<&'src str>),
-    Bin(Spanned<Box<Self>>, BinOp, Spanned<Box<Self>>),
+    ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
+    CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
+    Unary(Spanned<Box<Self>>, UnaryOp),
 }
 
 #[derive(Debug)]

@@ -20,22 +20,22 @@ fn int<'src>() -> impl Tokenizer<'src, Token<'src>> {
 }
 
 fn escape<'src>() -> impl Tokenizer<'src, char> {
-    just('\\').ignore_then(choice((
-        just('\\').to('\\'),
-        just('n').to('\n'),
-        just('r').to('\r'),
-        just('t').to('\t'),
-        just('0').to('\0'),
-        just('\'').to('\''),
-        just('"').to('"'),
-    )))
+    choice((
+        just(r#"\\"#).to('\\'),
+        just(r#"\n"#).to('\n'),
+        just(r#"\r"#).to('\r'),
+        just(r#"\t"#).to('\t'),
+        just(r#"\0"#).to('\0'),
+        just(r#"\'"#).to('\''),
+        just(r#"\""#).to('"'),
+    ))
 }
 
 fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
     choice((escape(), none_of(r#"""#).filter(char::is_ascii)))
         .repeated()
         .collect()
-        .delimited_by(just('"'), just('"'))
+        .padded_by(just('"'))
         .map(String)
 }
 

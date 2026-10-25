@@ -1,0 +1,96 @@
+extern fn print(str);
+extern fn iprint(i32);
+extern fn exit(i32);
+
+fn assert_int(name: str, actual: i32, expected: i32) {
+    if expected != actual {
+        print(name);
+        print(": expected ");
+        iprint(expected);
+        print(", actual ");
+        iprint(actual);
+        print("\n");
+        exit(1);
+    }
+}
+
+fn assert(name: str, value: bool) {
+    if !value {
+        print(name);
+        print(": assertion failed\n");
+        exit(1);
+    }
+}
+
+fn bin_test() {
+    assert_int("add", 5 + 2, 7);
+    assert_int("sub", 5 - 2, 3);
+    assert_int("mul", 5 * 2, 10);
+    assert_int("div", 5 / 2, 2);
+    assert_int("mod", 5 % 2, 1);
+    assert_int("left shift", 4 << 1, 8);
+    assert_int("right shift", 4 >> 1, 2);
+    assert_int("bitwise and", 3 & 2, 2);
+    assert_int("bitwise or", 3 | 2, 3);
+    assert_int("bitwise xor", 3 ^ 2, 1);
+    assert("equal", 0 == 0);
+    assert("not equal", 0 != 1);
+    assert("less than", 0 < 1);
+    assert("more than", 1 > 0);
+    assert("less than or equal (less than)", 0 <= 1);
+    assert("less than or equal (equal)", 0 <= 0);
+    assert("more than or equal (less than)", 1 >= 0);
+    assert("more than or equal (equal)", 0 >= 0);
+    assert("logic and", true and true);
+    assert("logic or", true or false);
+}
+
+fn unary_test() {
+    var a: i32;
+    var b: bool;
+    a = 42;
+    b = false;
+    assert_int("unary minus", -a, -42);
+    assert("unary not", !b);
+}
+
+fn var_test() {
+    var a: i32;
+    a = 42;
+    assert_int("variable", a, 42);
+}
+
+fn if_test() {
+    assert_int("if then", if true { 0 } else { 1 }, 0);
+    assert_int("if else", if false { 0 } else { 1 }, 1);
+}
+
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn fact(n: i32) -> i32 {
+    if n == 1 { 1 } else { n * fact(n - 1) }
+}
+
+extern fn add_c(i32, i32) -> i32;
+extern fn fact_c(i32) -> i32;
+
+fn fn_test() {
+    assert_int("simple function", add(4, 5), 9);
+    assert_int("recursive function", fact(5), 120);
+
+    assert_int("simple C function from Arufa", add_c(4, 5), 9);
+    assert_int("recursive C function from Arufa", fact_c(5), 120);
+}
+
+fn main() -> i32 {
+    bin_test();
+    unary_test();
+    var_test();
+    if_test();
+    fn_test();
+
+    print("OK\n");
+    0
+}

@@ -101,7 +101,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         Ok(Value::new(basic_value, Type::Bool))
     }
 
-    fn compile_str_expr(&self, value: &'src str) -> Result<Value<'ctx>, Error> {
+    fn compile_str_expr(&self, value: &str) -> Result<Value<'ctx>, Error> {
         let global_value = self.builder.build_global_string_ptr(value, "str")?;
         Ok(Value::new(global_value.as_basic_value_enum(), Type::Str))
     }
@@ -118,7 +118,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         let var = find_var(name, scope)?;
         let basic_value =
             self.builder
-                .build_load(self.context.i32_type(), var.ptr_value(), "deref")?;
+                .build_load(self.llvm_type_of(var.ty()), var.ptr_value(), "deref")?;
         Ok(Value::new(basic_value, var.ty()))
     }
 
@@ -210,9 +210,9 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         use LogicBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
-        check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        check_type_match(Type::Bool, lhs_value.ty, &lhs.span)?;
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
+        check_type_match(Type::Bool, rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             And => self

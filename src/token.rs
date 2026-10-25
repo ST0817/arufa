@@ -41,7 +41,7 @@ pub enum Token<'src> {
     Fn,
     Extern,
     Int(u32),
-    String(&'src str),
+    String(String),
     Name(&'src str),
 }
 

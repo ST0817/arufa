@@ -73,7 +73,8 @@
             inherit clippy;
             test = pkgs.runCommandCC "test" { nativeBuildInputs = [ crate ]; } ''
               export ARUFA=${crate}/bin/arufa
-              ${./test/run.sh}
+              cp -r ${./test} test
+              ./test/run.sh
               touch $out
             '';
           };

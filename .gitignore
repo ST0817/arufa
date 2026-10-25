@@ -9,7 +9,6 @@
 /target
 
 # test
-/test/*
-!/test/*.arufa
-!/test/*.c
-!/test/run.sh
+/test/test.ll
+/test/test.o
+/test/test

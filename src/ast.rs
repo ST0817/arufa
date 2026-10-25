@@ -62,7 +62,7 @@ pub enum UnaryOp {
 pub enum Expr<'src> {
     Int(u32),
     Bool(bool),
-    Str(&'src str),
+    Str(String),
     Unit,
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),

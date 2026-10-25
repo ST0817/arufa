@@ -22,9 +22,9 @@ fn escape<'src>() -> impl Tokenizer<'src, char> {
     just('\\').ignore_then(choice((
         just('\\').to('\\'),
         just('n').to('\n'),
-        just('r').to('\n'),
-        just('t').to('\n'),
-        just('0').to('\n'),
+        just('r').to('\r'),
+        just('t').to('\t'),
+        just('0').to('\0'),
         just('\'').to('\''),
         just('"').to('"'),
     )))
@@ -33,7 +33,7 @@ fn escape<'src>() -> impl Tokenizer<'src, char> {
 fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
     choice((escape(), none_of(r#"""#).filter(char::is_ascii)))
         .repeated()
-        .to_slice()
+        .collect()
         .delimited_by(just('"'), just('"'))
         .map(String)
 }
@@ -42,7 +42,7 @@ fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
     let head = any().filter(char::is_ascii_lowercase);
     let tail = any()
         .filter(|char: &char| char.is_ascii_lowercase() || char.is_ascii_digit() || *char == '_');
-    head.ignore_then(tail).to_slice().map(Name)
+    head.ignore_then(tail.repeated()).to_slice().map(Name)
 }
 
 fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {

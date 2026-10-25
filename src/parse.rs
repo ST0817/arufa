@@ -31,14 +31,17 @@ trait Parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
 trait Operator<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
     ChumskyOperator<'tokens, I, T, Err<Rich<'tokens, Token<'src>>>> + Clone;
 
+fn parens<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
+    parser: impl Parser<'tokens, 'src, I, T>,
+) -> impl Parser<'tokens, 'src, I, T> {
+    parser.delimited_by(just(LParen), just(RParen))
+}
+
 fn parens_comma<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
     parser: impl Parser<'tokens, 'src, I, T>,
 ) -> impl Parser<'tokens, 'src, I, Vec<T>> {
     use Token::*;
-    parser
-        .separated_by(just(Comma))
-        .collect()
-        .delimited_by(just(LParen), just(RParen))
+    parens(parser.separated_by(just(Comma)).collect())
 }
 
 fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -59,7 +62,7 @@ fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'to
         just(Token::I64).to(Type::I64),
         just(Token::Bool).to(Type::Bool),
         just(Token::Str).to(Type::Str),
-        just(LParen).ignore_then(just(RParen)).to(Type::Unit),
+        parens(empty()).to(Type::Unit),
     ))
     .labelled("type")
 }
@@ -82,7 +85,7 @@ fn str_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 
 fn unit_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    just(LParen).ignore_then(just(RParen)).map(|_| Expr::Unit)
+    parens(empty()).map(|_| Expr::Unit)
 }
 
 fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
@@ -279,6 +282,7 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
             if_expr(expr.clone()),
             call_expr(expr.clone()),
             var_expr(),
+            parens(expr.clone()),
         ));
         op_expr(atom).labelled("expression")
     });

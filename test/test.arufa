@@ -56,6 +56,7 @@ fn bin_test() {
     assert("more than or equal (equal)", 0 >= 0);
     assert("logic and", true and true);
     assert("logic or", true or false);
+    assert_i32("parenthesized expression", (3 + 4) * 5, 35);
 }
 
 fn unary_test() {

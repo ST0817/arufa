@@ -3,6 +3,7 @@ use chumsky::{
     error::Rich,
     extra::Err,
     primitive::{any, choice, just, none_of},
+    recursive::recursive,
     span::Spanned,
     text::{self, ascii::keyword},
 };
@@ -101,10 +102,35 @@ fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
     ))
 }
 
+fn line_comment<'src>() -> impl Tokenizer<'src, ()> {
+    just("//").then(none_of("\n").repeated()).ignored()
+}
+
+fn block_comment<'src>() -> impl Tokenizer<'src, ()> {
+    recursive(|block| {
+        let start = just("/*");
+        let end = just("*/");
+        choice((block, any().and_is(start.not()).and_is(end.not()).ignored()))
+            .repeated()
+            .delimited_by(start, end)
+            .ignored()
+    })
+}
+
+fn skip<'src>() -> impl Tokenizer<'src, ()> {
+    choice((
+        any().filter(char::is_ascii_whitespace).ignored(),
+        line_comment(),
+        block_comment(),
+    ))
+    .repeated()
+    .ignored()
+}
+
 fn tokenizer<'src>() -> impl Tokenizer<'src, Vec<Spanned<Token<'src>>>> {
     choice((symbols(), keywords(), int(), str(), name()))
         .spanned()
-        .padded()
+        .padded_by(skip())
         .repeated()
         .collect()
 }

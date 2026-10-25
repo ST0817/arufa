@@ -1,3 +1,6 @@
+// line comment
+/* block comment /* nested block comment */ */
+
 extern fn print(str);
 extern fn print_i32(i32);
 extern fn print_u32(u32);

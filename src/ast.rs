@@ -4,17 +4,38 @@ use chumsky::span::Spanned;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
     I32,
+    I64,
     Bool,
     Str,
     Unit,
+}
+
+impl Type {
+    pub fn is_int(self) -> bool {
+        use Type::*;
+        matches!(self, U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64)
+    }
 }
 
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use Type::*;
         match self {
+            U8 => f.write_str("u8"),
+            U16 => f.write_str("u16"),
+            U32 => f.write_str("u32"),
+            U64 => f.write_str("u64"),
+            I8 => f.write_str("i8"),
+            I16 => f.write_str("i16"),
             I32 => f.write_str("i32"),
+            I64 => f.write_str("i64"),
             Bool => f.write_str("bool"),
             Str => f.write_str("str"),
             Unit => f.write_str("()"),
@@ -29,11 +50,15 @@ pub enum ArithBinOp {
     Mul,
     Div,
     Mod,
-    LShift,
-    RShift,
     And,
     Or,
     Xor,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ShiftBinOp {
+    LShift,
+    RShift,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +91,7 @@ pub enum Expr<'src> {
     Unit,
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
+    ShiftBin(Spanned<Box<Self>>, ShiftBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     LogicBin(Spanned<Box<Self>>, LogicBinOp, Spanned<Box<Self>>),
     Unary(Spanned<Box<Self>>, UnaryOp),

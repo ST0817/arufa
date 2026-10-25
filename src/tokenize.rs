@@ -78,7 +78,14 @@ fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {
 
 fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
     choice((
+        keyword("u8").to(U8),
+        keyword("u16").to(U16),
+        keyword("u32").to(U32),
+        keyword("u64").to(U64),
+        keyword("i8").to(I8),
+        keyword("i16").to(I16),
         keyword("i32").to(I32),
+        keyword("i64").to(I64),
         keyword("bool").to(Bool),
         keyword("str").to(Str),
         keyword("true").to(True),

@@ -12,7 +12,9 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, Stmt, Type, UnaryOp},
+    ast::{
+        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type, UnaryOp,
+    },
     error::Error,
     token::Token::{self, LParen, RParen},
 };
@@ -44,29 +46,22 @@ fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     select! { Token::Name(ident) => ident }.labelled(TextExpected::<()>::AnyIdentifier)
 }
 
-fn i32_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Type> {
-    just(Token::I32).to(Type::I32)
-}
-
-fn bool_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Type> {
-    just(Token::Bool).to(Type::Bool)
-}
-
-fn str_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Type> {
-    just(Token::Str).to(Type::Str)
-}
-
-fn unit_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Type> {
-    just(LParen).ignore_then(just(RParen)).to(Type::Unit)
-}
-
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
-    choice((i32_type(), bool_type(), str_type(), unit_type())).labelled("type")
+    choice((
+        just(Token::U8).to(Type::U8),
+        just(Token::U16).to(Type::U16),
+        just(Token::U32).to(Type::U32),
+        just(Token::U64).to(Type::U64),
+        just(Token::I8).to(Type::I8),
+        just(Token::I16).to(Type::I16),
+        just(Token::I32).to(Type::I32),
+        just(Token::I64).to(Type::I64),
+        just(Token::Bool).to(Type::Bool),
+        just(Token::Str).to(Type::Str),
+        just(LParen).ignore_then(just(RParen)).to(Type::Unit),
+    ))
+    .labelled("type")
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -147,7 +142,7 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     use {
-        Expr::{ArithBin, CmpBin, LogicBin},
+        Expr::{ArithBin, CmpBin, LogicBin, ShiftBin},
         Token::*,
     };
     expr.spanned()
@@ -159,8 +154,8 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
             infix_op(left(8), Perc, ArithBinOp::Mod, ArithBin),
             infix_op(left(7), Plus, ArithBinOp::Add, ArithBin),
             infix_op(left(7), Minus, ArithBinOp::Sub, ArithBin),
-            infix_op(left(6), LShift, ArithBinOp::LShift, ArithBin),
-            infix_op(left(6), RShift, ArithBinOp::RShift, ArithBin),
+            infix_op(left(6), LShift, ShiftBinOp::LShift, ShiftBin),
+            infix_op(left(6), RShift, ShiftBinOp::RShift, ShiftBin),
             infix_op(left(5), Amp, ArithBinOp::And, ArithBin),
             infix_op(left(4), Hat, ArithBinOp::Xor, ArithBin),
             infix_op(left(3), Pipe, ArithBinOp::Or, ArithBin),

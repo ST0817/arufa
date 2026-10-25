@@ -11,7 +11,9 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, Stmt, Type, UnaryOp},
+    ast::{
+        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type, UnaryOp,
+    },
     error::{CheckError, CheckErrorKind::*, Error},
     func_defs::{FuncDef, FuncDefs, FuncSig},
     scope::{Scope, Var},
@@ -29,6 +31,17 @@ fn find_var<'src, 'ctx>(
 fn check_type_match(expected: Type, found: Type, span: &SimpleSpan) -> Result<(), Error> {
     if expected != found {
         return Err(CheckError::new(TypeMismatch { expected, found }, *span).into());
+    }
+    Ok(())
+}
+
+fn check_bool_type(ty: Type, span: &SimpleSpan) -> Result<(), Error> {
+    check_type_match(Type::Bool, ty, span)
+}
+
+fn check_int_type(ty: Type, span: &SimpleSpan) -> Result<(), Error> {
+    if !ty.is_int() {
+        return Err(CheckError::new(NotIntType(ty), *span).into());
     }
     Ok(())
 }
@@ -68,7 +81,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn llvm_type_of(&self, ty: Type) -> BasicTypeEnum<'ctx> {
         use Type::*;
         match ty {
-            I32 => self.context.i32_type().as_basic_type_enum(),
+            U8 | I8 => self.context.i8_type().as_basic_type_enum(),
+            U16 | I16 => self.context.i16_type().as_basic_type_enum(),
+            U32 | I32 => self.context.i32_type().as_basic_type_enum(),
+            U64 | I64 => self.context.i64_type().as_basic_type_enum(),
             Bool => self.context.bool_type().as_basic_type_enum(),
             Str => self
                 .context
@@ -131,10 +147,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     ) -> Result<Value<'ctx>, Error> {
         use ArithBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        check_int_type(lhs_value.ty, &lhs.span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
+        check_type_match(lhs_value.ty, rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             Add => self
@@ -152,13 +168,6 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Mod => self
                 .builder
                 .build_int_signed_rem(lhs_int_value, rhs_int_value, "srem")?,
-            LShift => self
-                .builder
-                .build_left_shift(lhs_int_value, rhs_int_value, "left_shift")?,
-            RShift => {
-                self.builder
-                    .build_right_shift(lhs_int_value, rhs_int_value, true, "right_shift")?
-            }
             And => self
                 .builder
                 .build_and(lhs_int_value, rhs_int_value, "and")?,
@@ -166,6 +175,32 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Xor => self
                 .builder
                 .build_xor(lhs_int_value, rhs_int_value, "xor")?,
+        };
+        Ok(Value::new(int_value.into(), Type::I32))
+    }
+
+    fn compile_shift_bin_expr(
+        &self,
+        lhs: &Spanned<Box<Expr<'src>>>,
+        op: ShiftBinOp,
+        rhs: &Spanned<Box<Expr<'src>>>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        use ShiftBinOp::*;
+        let lhs_value = self.compile_expr(lhs, scope)?;
+        check_int_type(lhs_value.ty, &lhs.span)?;
+        let lhs_int_value = lhs_value.basic_value.into_int_value();
+        let rhs_value = self.compile_expr(rhs, scope)?;
+        check_int_type(rhs_value.ty, &rhs.span)?;
+        let rhs_int_value = rhs_value.basic_value.into_int_value();
+        let int_value = match op {
+            LShift => self
+                .builder
+                .build_left_shift(lhs_int_value, rhs_int_value, "left_shift")?,
+            RShift => {
+                self.builder
+                    .build_right_shift(lhs_int_value, rhs_int_value, true, "right_shift")?
+            }
         };
         Ok(Value::new(int_value.into(), Type::I32))
     }
@@ -179,10 +214,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     ) -> Result<Value<'ctx>, Error> {
         use CmpBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        check_int_type(lhs_value.ty, &lhs.span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
+        check_int_type(rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = self.builder.build_int_compare(
             match op {
@@ -210,9 +245,9 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         use LogicBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
-        check_type_match(Type::Bool, lhs_value.ty, &lhs.span)?;
+        check_bool_type(lhs_value.ty, &lhs.span)?;
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_type_match(Type::Bool, rhs_value.ty, &rhs.span)?;
+        check_bool_type(rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             And => self
@@ -236,12 +271,12 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         let expr_int_value = expr_value.basic_value.into_int_value();
         match op {
             Neg => {
-                check_type_match(Type::I32, expr_value.ty, &expr.span)?;
+                check_int_type(expr_value.ty, &expr.span)?;
                 let int_value = self.builder.build_int_neg(expr_int_value, "neg")?;
                 Ok(Value::new(int_value.into(), Type::I32))
             }
             Not => {
-                check_type_match(Type::Bool, expr_value.ty, &expr.span)?;
+                check_bool_type(expr_value.ty, &expr.span)?;
                 let int_value = self.builder.build_not(expr_int_value, "not")?;
                 Ok(Value::new(int_value.into(), Type::Bool))
             }
@@ -263,7 +298,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             let merge_block = self.context.append_basic_block(func_value, "merge");
 
             let cond_value = self.compile_expr(cond, scope)?;
-            check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
+            check_bool_type(cond_value.ty, &cond.span)?;
             self.builder.build_conditional_branch(
                 cond_value.basic_value.into_int_value(),
                 then_block,
@@ -294,7 +329,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             let merge_block = self.context.append_basic_block(func_value, "merge");
 
             let cond_value = self.compile_expr(cond, scope)?;
-            check_type_match(Type::Bool, cond_value.ty, &cond.span)?;
+            check_bool_type(cond_value.ty, &cond.span)?;
             self.builder.build_conditional_branch(
                 cond_value.basic_value.into_int_value(),
                 then_block,
@@ -358,6 +393,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Unit => self.compile_unit_expr(),
             Var(name) => self.compile_var_expr(name, scope),
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
+            ShiftBin(lhs, op, rhs) => self.compile_shift_bin_expr(lhs, *op, rhs, scope),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
             LogicBin(lhs, op, rhs) => self.compile_logic_bin_expr(lhs, *op, rhs, scope),
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),

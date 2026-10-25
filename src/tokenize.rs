@@ -39,11 +39,10 @@ fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
 }
 
 fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
-    any()
-        .filter(char::is_ascii_alphabetic)
-        .ignore_then(any().filter(char::is_ascii_alphanumeric).repeated())
-        .to_slice()
-        .map(Name)
+    let head = any().filter(char::is_ascii_lowercase);
+    let tail = any()
+        .filter(|char: &char| char.is_ascii_lowercase() || char.is_ascii_digit() || *char == '_');
+    head.ignore_then(tail).to_slice().map(Name)
 }
 
 fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {

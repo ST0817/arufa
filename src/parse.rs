@@ -12,7 +12,7 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, Param, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, Stmt, Type, UnaryOp},
     error::Error,
     token::Token::{self, LParen, RParen},
 };
@@ -147,24 +147,31 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     use {
-        Expr::{ArithBin, CmpBin},
+        Expr::{ArithBin, CmpBin, LogicBin},
         Token::*,
     };
     expr.spanned()
         .pratt((
-            prefix_op(3, Minus, UnaryOp::Neg),
-            prefix_op(3, Not, UnaryOp::Not),
-            infix_op(left(2), Star, ArithBinOp::Mul, ArithBin),
-            infix_op(left(2), Slash, ArithBinOp::Div, ArithBin),
-            infix_op(left(2), Perc, ArithBinOp::Mod, ArithBin),
-            infix_op(left(1), Plus, ArithBinOp::Add, ArithBin),
-            infix_op(left(1), Minus, ArithBinOp::Sub, ArithBin),
-            infix_op(left(0), Eq, CmpBinOp::Eq, CmpBin),
-            infix_op(left(0), NotEq, CmpBinOp::NotEq, CmpBin),
-            infix_op(left(0), LT, CmpBinOp::LT, CmpBin),
-            infix_op(left(0), LE, CmpBinOp::LE, CmpBin),
-            infix_op(left(0), GT, CmpBinOp::GT, CmpBin),
-            infix_op(left(0), GE, CmpBinOp::GE, CmpBin),
+            prefix_op(9, Minus, UnaryOp::Neg),
+            prefix_op(9, Not, UnaryOp::Not),
+            infix_op(left(8), Star, ArithBinOp::Mul, ArithBin),
+            infix_op(left(8), Slash, ArithBinOp::Div, ArithBin),
+            infix_op(left(8), Perc, ArithBinOp::Mod, ArithBin),
+            infix_op(left(7), Plus, ArithBinOp::Add, ArithBin),
+            infix_op(left(7), Minus, ArithBinOp::Sub, ArithBin),
+            infix_op(left(6), LShift, ArithBinOp::LShift, ArithBin),
+            infix_op(left(6), RShift, ArithBinOp::RShift, ArithBin),
+            infix_op(left(5), Amp, ArithBinOp::And, ArithBin),
+            infix_op(left(4), Hat, ArithBinOp::Xor, ArithBin),
+            infix_op(left(3), Pipe, ArithBinOp::Or, ArithBin),
+            infix_op(left(2), Eq, CmpBinOp::Eq, CmpBin),
+            infix_op(left(2), NotEq, CmpBinOp::NotEq, CmpBin),
+            infix_op(left(2), LT, CmpBinOp::LT, CmpBin),
+            infix_op(left(2), LE, CmpBinOp::LE, CmpBin),
+            infix_op(left(2), GT, CmpBinOp::GT, CmpBin),
+            infix_op(left(2), GE, CmpBinOp::GE, CmpBin),
+            infix_op(left(1), And, LogicBinOp::And, LogicBin),
+            infix_op(left(0), Or, LogicBinOp::Or, LogicBin),
         ))
         .map(|spanned| spanned.inner)
 }

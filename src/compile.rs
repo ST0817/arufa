@@ -11,7 +11,7 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, Param, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, Stmt, Type, UnaryOp},
     error::{CheckError, CheckErrorKind::*, Error},
     func_defs::{FuncDef, FuncDefs, FuncSig},
     scope::{Scope, Var},
@@ -131,8 +131,8 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     ) -> Result<Value<'ctx>, Error> {
         use ArithBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        let lhs_int_value = lhs_value.basic_value.into_int_value();
         check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
         check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
@@ -152,6 +152,20 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Mod => self
                 .builder
                 .build_int_signed_rem(lhs_int_value, rhs_int_value, "srem")?,
+            LShift => self
+                .builder
+                .build_left_shift(lhs_int_value, rhs_int_value, "left_shift")?,
+            RShift => {
+                self.builder
+                    .build_right_shift(lhs_int_value, rhs_int_value, true, "right_shift")?
+            }
+            And => self
+                .builder
+                .build_and(lhs_int_value, rhs_int_value, "and")?,
+            Or => self.builder.build_or(lhs_int_value, rhs_int_value, "or")?,
+            Xor => self
+                .builder
+                .build_xor(lhs_int_value, rhs_int_value, "xor")?,
         };
         Ok(Value::new(int_value.into(), Type::I32))
     }
@@ -165,8 +179,8 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     ) -> Result<Value<'ctx>, Error> {
         use CmpBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        let lhs_int_value = lhs_value.basic_value.into_int_value();
         check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
         check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
@@ -183,6 +197,31 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             rhs_int_value,
             "cmp",
         )?;
+        Ok(Value::new(int_value.into(), Type::Bool))
+    }
+
+    fn compile_logic_bin_expr(
+        &self,
+        lhs: &Spanned<Box<Expr<'src>>>,
+        op: LogicBinOp,
+        rhs: &Spanned<Box<Expr<'src>>>,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        use LogicBinOp::*;
+        let lhs_value = self.compile_expr(lhs, scope)?;
+        let lhs_int_value = lhs_value.basic_value.into_int_value();
+        check_type_match(Type::I32, lhs_value.ty, &lhs.span)?;
+        let rhs_value = self.compile_expr(rhs, scope)?;
+        check_type_match(Type::I32, rhs_value.ty, &rhs.span)?;
+        let rhs_int_value = rhs_value.basic_value.into_int_value();
+        let int_value = match op {
+            And => self
+                .builder
+                .build_and(lhs_int_value, rhs_int_value, "logic_and")?,
+            Or => self
+                .builder
+                .build_or(lhs_int_value, rhs_int_value, "logic_or")?,
+        };
         Ok(Value::new(int_value.into(), Type::Bool))
     }
 
@@ -320,6 +359,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Var(name) => self.compile_var_expr(name, scope),
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
+            LogicBin(lhs, op, rhs) => self.compile_logic_bin_expr(lhs, *op, rhs, scope),
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
             If(cond, then, els) => self.compile_if_expr(cond, then, els.as_ref(), scope),
             Call(name, args) => self.compile_call_expr(name, args, scope),

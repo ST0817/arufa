@@ -29,6 +29,11 @@ pub enum ArithBinOp {
     Mul,
     Div,
     Mod,
+    LShift,
+    RShift,
+    And,
+    Or,
+    Xor,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +44,12 @@ pub enum CmpBinOp {
     LE,
     GT,
     GE,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogicBinOp {
+    And,
+    Or,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +67,7 @@ pub enum Expr<'src> {
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
+    LogicBin(Spanned<Box<Self>>, LogicBinOp, Spanned<Box<Self>>),
     Unary(Spanned<Box<Self>>, UnaryOp),
     If(
         Spanned<Box<Self>>,

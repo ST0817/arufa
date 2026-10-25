@@ -83,6 +83,7 @@
               nixd
               nixfmt
               taplo
+              clang-tools
             ];
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
           };

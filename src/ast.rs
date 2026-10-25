@@ -113,41 +113,7 @@ impl<'src> Param<'src> {
 }
 
 #[derive(Debug)]
-pub struct Func<'src> {
-    name: Spanned<&'src str>,
-    paraams: Vec<Param<'src>>,
-    ret_type: Option<Type>,
-    body: Block<'src>,
-}
-
-impl<'src> Func<'src> {
-    pub fn new(
-        name: Spanned<&'src str>,
-        paraams: Vec<Param<'src>>,
-        ret_type: Option<Type>,
-        body: Block<'src>,
-    ) -> Self {
-        Self {
-            name,
-            paraams,
-            ret_type,
-            body,
-        }
-    }
-
-    pub fn name(&self) -> &Spanned<&'src str> {
-        &self.name
-    }
-
-    pub fn params(&self) -> &[Param<'src>] {
-        &self.paraams
-    }
-
-    pub fn ret_type(&self) -> Option<Type> {
-        self.ret_type
-    }
-
-    pub fn body(&self) -> &Block<'src> {
-        &self.body
-    }
+pub enum Item<'src> {
+    Func(Spanned<&'src str>, Vec<Param<'src>>, Type, Block<'src>),
+    Extern(Spanned<&'src str>, Vec<Type>, Type),
 }

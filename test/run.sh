@@ -18,7 +18,7 @@ assert() {
 
     $ARUFA --emit ir $path $ir_path
     $ARUFA --emit obj $path $obj_path
-    $CC $obj_path -o $bin_path
+    $CC $obj_path ./test.c -o $bin_path
     $bin_path > /dev/null || actual=$?
     if [ $actual -eq $expected ]; then
         echo "[${name}] OK"

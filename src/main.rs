@@ -29,9 +29,9 @@ mod tokenize;
 fn run(cli: &Cli, src: &mut String, src_path: &Path) -> Result<(), Error> {
     File::open(cli.src_path())?.read_to_string(src)?;
     let tokens = tokenize(src)?;
-    let funcs = parse(&tokens, src)?;
+    let items = parse(&tokens, src)?;
     let context = Context::create();
-    let module = compile(&context, src_path, &funcs)?;
+    let module = compile(&context, src_path, &items)?;
     emit(cli, &module)?;
     Ok(())
 }

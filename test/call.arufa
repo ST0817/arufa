@@ -1,10 +1,13 @@
+extern fn puts(str);
+extern fn iprint(i32);
+
 fn bye() {
-    print("Good bye.");
+    puts("Good bye.");
 }
 
 fn main() -> i32 {
     iprint(42);
-    print("Hello world!");
+    puts("Hello world!");
     bye();
     0
 }

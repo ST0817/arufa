@@ -35,7 +35,7 @@ fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
         .repeated()
         .to_slice()
         .delimited_by(just('"'), just('"'))
-        .map(Str)
+        .map(String)
 }
 
 fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
@@ -76,12 +76,14 @@ fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
     choice((
         keyword("i32").to(I32),
         keyword("bool").to(Bool),
+        keyword("str").to(Str),
         keyword("true").to(True),
         keyword("false").to(False),
         keyword("if").to(If),
         keyword("else").to(Else),
         keyword("var").to(Var),
         keyword("fn").to(Fn),
+        keyword("extern").to(Extern),
     ))
 }
 

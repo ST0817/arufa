@@ -4,7 +4,7 @@ use chumsky::{
     extra::Err,
     input::{Input, ValueInput},
     pratt::{Associativity, Operator as ChumskyOperator, infix, left, prefix},
-    primitive::{choice, just},
+    primitive::{choice, empty, just},
     recursive::Recursive,
     select,
     span::{SimpleSpan, SpanWrap, Spanned},
@@ -12,7 +12,7 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Func, Param, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, Param, Stmt, Type, UnaryOp},
     error::Error,
     token::Token::{self, LParen, RParen},
 };
@@ -54,6 +54,11 @@ fn bool_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     just(Token::Bool).to(Type::Bool)
 }
 
+fn str_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Type> {
+    just(Token::Str).to(Type::Str)
+}
+
 fn unit_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Type> {
     just(LParen).ignore_then(just(RParen)).to(Type::Unit)
@@ -61,7 +66,7 @@ fn unit_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
-    choice((i32_type(), bool_type(), unit_type())).labelled("type")
+    choice((i32_type(), bool_type(), str_type(), unit_type())).labelled("type")
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -77,7 +82,7 @@ fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 
 fn str_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    select! { Token::Str(value) => Expr::Str(value) }
+    select! { Token::String(value) => Expr::Str(value) }
 }
 
 fn unit_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -220,21 +225,38 @@ fn param<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         .map(|(name, ty)| Param::new(name, ty))
 }
 
-fn func<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+fn func_item<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
-) -> impl Parser<'tokens, 'src, I, Func<'src>> {
+) -> impl Parser<'tokens, 'src, I, Item<'src>> {
     use Token::*;
     just(Fn)
         .ignore_then(name().spanned())
         .then(parens_comma(param()))
-        .then(just(Arrow).ignore_then(ty()).or_not())
+        .then(just(Arrow).ignore_then(ty()).or(empty().to(Type::Unit)))
         .then(block(expr))
-        .map(|(((name, params), ret_type), body)| Func::new(name, params, ret_type, body))
-        .labelled("function")
+        .map(|(((name, params), ret_type), body)| Item::Func(name, params, ret_type, body))
+}
+
+fn extern_item<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Item<'src>> {
+    use Token::*;
+    just(Extern)
+        .ignore_then(just(Fn))
+        .ignore_then(name().spanned())
+        .then(parens_comma(ty()))
+        .then(just(Arrow).ignore_then(ty()).or(empty().to(Type::Unit)))
+        .then_ignore(just(Semic))
+        .map(|((name, param_types), ret_type)| Item::Extern(name, param_types, ret_type))
+}
+
+fn item<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Parser<'tokens, 'src, I, Item<'src>> {
+    choice((func_item(expr), extern_item())).labelled("item")
 }
 
 fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
--> impl Parser<'tokens, 'src, I, Vec<Func<'src>>> {
+-> impl Parser<'tokens, 'src, I, Vec<Item<'src>>> {
     let mut expr = Recursive::declare();
     expr.define({
         let atom = choice((
@@ -248,12 +270,12 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         ));
         op_expr(atom).labelled("expression")
     });
-    func(expr).repeated().collect()
+    item(expr).repeated().collect()
 }
 
-pub fn parse<'src>(tokens: &[Spanned<Token<'src>>], src: &str) -> Result<Vec<Func<'src>>, Error> {
-    let funcs = parser()
+pub fn parse<'src>(tokens: &[Spanned<Token<'src>>], src: &str) -> Result<Vec<Item<'src>>, Error> {
+    let items = parser()
         .parse(tokens.split_spanned((src.len()..src.len()).into()))
         .into_result()?;
-    Ok(funcs)
+    Ok(items)
 }

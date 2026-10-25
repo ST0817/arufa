@@ -11,7 +11,7 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Func, Stmt, Type, UnaryOp},
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, Param, Stmt, Type, UnaryOp},
     error::{CheckError, CheckErrorKind::*, Error},
     func_defs::{FuncDef, FuncDefs, FuncSig},
     scope::{Scope, Var},
@@ -299,10 +299,11 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                 .collect::<Vec<_>>(),
             "call",
         )?;
-        Ok(Value::new(
-            call_value.try_as_basic_value().unwrap_basic(),
-            func_def.sig().ret(),
-        ))
+        Ok(call_value
+            .try_as_basic_value()
+            .basic()
+            .map(|basic_value| Value::new(basic_value, func_def.sig().ret()))
+            .unwrap_or(self.unit_value()))
     }
 
     fn compile_expr(
@@ -383,100 +384,49 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         }
     }
 
-    fn def_print(&mut self) -> Result<(), Error> {
-        let puts_type = self.context.void_type().fn_type(
-            &[self.context.ptr_type(AddressSpace::default()).into()],
-            true,
-        );
-        let puts = self.module.add_function("puts", puts_type, None);
-
-        let print_type = self.context.i32_type().fn_type(
-            &[self.context.ptr_type(AddressSpace::default()).into()],
-            false,
-        );
-        let print = self.module.add_function("print", print_type, None);
-        self.func_defs.insert(
-            "print",
-            FuncDef::new(print, FuncSig::new(vec![Type::Str], Type::I32)),
-        );
-        let print_entry = self.context.append_basic_block(print, "entry");
-        self.builder.position_at_end(print_entry);
-        let param = print.get_nth_param(0).unwrap().into_pointer_value();
-        self.builder
-            .build_call(puts, &[param.into()], "puts_call")?;
-        self.builder.build_return(Some(
-            &self
-                .context
-                .i32_type()
-                .const_int(0, false)
-                .as_basic_value_enum(),
-        ))?;
-        Ok(())
-    }
-
-    fn def_iprint(&mut self) -> Result<(), Error> {
-        let printf_type = self.context.void_type().fn_type(
-            &[self.context.ptr_type(AddressSpace::default()).into()],
-            true,
-        );
-        let printf = self.module.add_function("printf", printf_type, None);
-
-        let iprint_type = self
-            .context
-            .i32_type()
-            .fn_type(&[self.context.i32_type().into()], false);
-        let iprint = self.module.add_function("iprint", iprint_type, None);
-        self.func_defs.insert(
-            "iprint",
-            FuncDef::new(iprint, FuncSig::new(vec![Type::I32], Type::I32)),
-        );
-        let iprint_entry = self.context.append_basic_block(iprint, "entry");
-        self.builder.position_at_end(iprint_entry);
-        let param = iprint.get_nth_param(0).unwrap().into_int_value();
-        let fmt = self.builder.build_global_string_ptr("%d\n", "fmt")?;
-        self.builder.build_call(
-            printf,
-            &[fmt.as_pointer_value().into(), param.into()],
-            "printf_call",
-        )?;
-        self.builder.build_return(Some(
-            &self
-                .context
-                .i32_type()
-                .const_int(0, false)
-                .as_basic_value_enum(),
-        ))?;
-        Ok(())
-    }
-
-    fn compile_func(&mut self, func: &Func<'src>) -> Result<(), Error> {
-        let None = self.func_defs.get(func.name()) else {
-            return Err(CheckError::new(AlreadyDefined, func.name().span).into());
+    fn define_func(
+        &mut self,
+        name: &Spanned<&'src str>,
+        param_types: Vec<Type>,
+        ret_type: Type,
+    ) -> Result<FunctionValue<'ctx>, Error> {
+        let None = self.func_defs.get(name) else {
+            return Err(CheckError::new(AlreadyDefined, name.span).into());
         };
-        let param_types = func
-            .params()
-            .iter()
-            .map(|param| param.ty())
-            .collect::<Vec<_>>();
-        let ret_type = func.ret_type().unwrap_or(Type::Unit);
         let llvm_param_types = param_types
             .iter()
             .map(|param_type| self.llvm_type_of(*param_type).into())
             .collect::<Vec<_>>();
-        let llvm_ret_type = self.llvm_type_of(ret_type);
-        let llvm_func_type = llvm_ret_type.fn_type(&llvm_param_types, false);
-        let func_value = self.module.add_function(func.name(), llvm_func_type, None);
+        let llvm_func_type = if let Type::Unit = ret_type {
+            self.context.void_type().fn_type(&llvm_param_types, false)
+        } else {
+            self.llvm_type_of(ret_type)
+                .fn_type(&llvm_param_types, false)
+        };
+        let func_value = self.module.add_function(name, llvm_func_type, None);
         self.func_defs.insert(
-            func.name(),
+            name,
             FuncDef::new(func_value, FuncSig::new(param_types, ret_type)),
         );
+        Ok(func_value)
+    }
+
+    fn compile_func_item(
+        &mut self,
+        name: &Spanned<&'src str>,
+        params: &[Param<'src>],
+        ret_type: Type,
+        body: &Block<'src>,
+    ) -> Result<(), Error> {
+        let param_types = params.iter().map(|param| param.ty()).collect::<Vec<_>>();
+        let func_value = self.define_func(name, param_types, ret_type)?;
         self.func_value = Some(func_value);
 
         let mut scope = Scope::new();
         let entry = self.context.append_basic_block(func_value, "entry");
         self.builder.position_at_end(entry);
 
-        for (i, param) in func.params().iter().enumerate() {
+        for (i, param) in params.iter().enumerate() {
             let ptr_value = self
                 .builder
                 .build_alloca(self.llvm_type_of(param.ty()), param.name())?;
@@ -485,16 +435,40 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             scope.push(Var::new(param.name(), ptr_value, param.ty()));
         }
 
-        let ret_value = self.compile_block(func.body(), &mut scope)?;
-        self.builder.build_return(Some(&ret_value.basic_value))?;
+        let ret_value = self.compile_block(body, &mut scope)?;
+        self.builder.build_return(if let Type::Unit = ret_type {
+            None
+        } else {
+            Some(&ret_value.basic_value)
+        })?;
         Ok(())
     }
 
-    fn compile_funcs(&mut self, funcs: &[Func<'src>]) -> Result<(), Error> {
-        self.def_print()?;
-        self.def_iprint()?;
-        for func in funcs {
-            self.compile_func(func)?;
+    fn compile_extern_item(
+        &mut self,
+        name: &Spanned<&'src str>,
+        param_types: &[Type],
+        ret_type: Type,
+    ) -> Result<(), Error> {
+        self.define_func(name, param_types.to_vec(), ret_type)?;
+        Ok(())
+    }
+
+    fn compile_item(&mut self, item: &Item<'src>) -> Result<(), Error> {
+        use Item::*;
+        match item {
+            Func(name, params, ret_type, body) => {
+                self.compile_func_item(name, params, *ret_type, body)
+            }
+            Extern(name, param_types, ret_type) => {
+                self.compile_extern_item(name, param_types, *ret_type)
+            }
+        }
+    }
+
+    fn compile_items(&mut self, items: &[Item<'src>]) -> Result<(), Error> {
+        for item in items {
+            self.compile_item(item)?;
         }
 
         if !matches!(self.func_defs.get("main"), Some(def) if *def.sig() == FuncSig::new(Vec::new(), Type::I32))
@@ -508,10 +482,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 pub fn compile<'src, 'ctx>(
     context: &'ctx Context,
     src_path: &Path,
-    funcs: &[Func<'src>],
+    items: &[Item<'src>],
 ) -> Result<Module<'ctx>, Error> {
     let mut compiler = Compiler::new(context, src_path);
-    compiler.compile_funcs(funcs)?;
+    compiler.compile_items(items)?;
     compiler
         .module
         .verify()

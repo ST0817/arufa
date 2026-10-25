@@ -1,14 +1,27 @@
 extern fn print(str);
-extern fn iprint(i32);
+extern fn print_i32(i32);
+extern fn print_u32(u32);
 extern fn exit(i32);
 
-fn assert_int(name: str, actual: i32, expected: i32) {
+fn assert_i32(name: str, actual: i32, expected: i32) {
     if expected != actual {
         print(name);
         print(": expected ");
-        iprint(expected);
+        print_i32(expected);
         print(", actual ");
-        iprint(actual);
+        print_i32(actual);
+        print("\n");
+        exit(1);
+    }
+}
+
+fn assert_u32(name: str, actual: u32, expected: u32) {
+    if expected != actual {
+        print(name);
+        print(": expected ");
+        print_u32(expected);
+        print(", actual ");
+        print_u32(actual);
         print("\n");
         exit(1);
     }
@@ -23,16 +36,16 @@ fn assert(name: str, value: bool) {
 }
 
 fn bin_test() {
-    assert_int("add", 5 + 2, 7);
-    assert_int("sub", 5 - 2, 3);
-    assert_int("mul", 5 * 2, 10);
-    assert_int("div", 5 / 2, 2);
-    assert_int("mod", 5 % 2, 1);
-    assert_int("left shift", 4 << 1, 8);
-    assert_int("right shift", 4 >> 1, 2);
-    assert_int("bitwise and", 3 & 2, 2);
-    assert_int("bitwise or", 3 | 2, 3);
-    assert_int("bitwise xor", 3 ^ 2, 1);
+    assert_i32("add", 5 + 2, 7);
+    assert_i32("sub", 5 - 2, 3);
+    assert_i32("mul", 5 * 2, 10);
+    assert_i32("div", 5 / 2, 2);
+    assert_i32("mod", 5 % 2, 1);
+    assert_i32("left shift", 4 << 1, 8);
+    assert_i32("right shift", 4 >> 1, 2);
+    assert_i32("bitwise and", 3 & 2, 2);
+    assert_i32("bitwise or", 3 | 2, 3);
+    assert_i32("bitwise xor", 3 ^ 2, 1);
     assert("equal", 0 == 0);
     assert("not equal", 0 != 1);
     assert("less than", 0 < 1);
@@ -50,38 +63,48 @@ fn unary_test() {
     var b: bool;
     a = 42;
     b = false;
-    assert_int("unary minus", -a, -42);
+    assert_i32("unary minus", -a, -42);
     assert("unary not", !b);
 }
 
 fn var_test() {
     var a: i32;
     a = 42;
-    assert_int("variable", a, 42);
+    assert_i32("variable", a, 42);
 }
 
 fn if_test() {
-    assert_int("if then", if true { 0 } else { 1 }, 0);
-    assert_int("if else", if false { 0 } else { 1 }, 1);
+    assert_i32("if then", if true { 0 } else { 1 }, 0);
+    assert_i32("if else", if false { 0 } else { 1 }, 1);
 }
 
 fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
-fn fact(n: i32) -> i32 {
-    if n == 1 { 1 } else { n * fact(n - 1) }
+fn fact(n: u32) -> u32 {
+    if n == 1 { 1 as u32 } else { n * fact(n - 1 as u32) }
 }
 
 extern fn add_c(i32, i32) -> i32;
-extern fn fact_c(i32) -> i32;
+extern fn fact_c(u32) -> u32;
 
 fn fn_test() {
-    assert_int("simple function", add(4, 5), 9);
-    assert_int("recursive function", fact(5), 120);
+    assert_i32("simple function", add(4, 5), 9);
+    assert_i32("recursive function", fact(5 as u32) as i32, 120);
 
-    assert_int("simple C function from Arufa", add_c(4, 5), 9);
-    assert_int("recursive C function from Arufa", fact_c(5), 120);
+    assert_i32("simple C function from Arufa", add_c(4, 5), 9);
+    assert_i32("recursive C function from Arufa", fact_c(5 as u32) as i32, 120);
+}
+
+fn cast_test() {
+    var a: i8;
+    a = -1 as i8;
+    assert_i32("cast -1 (i8) to i32", a as i32, -1);
+    assert_u32("cast -1 (i8) to u32", a as u32, 4294967295 as u32);
+    var c: bool;
+    c = true;
+    assert_i32("cast bool to i32", c as i32, 1);
 }
 
 fn main() -> i32 {
@@ -90,6 +113,7 @@ fn main() -> i32 {
     var_test();
     if_test();
     fn_test();
+    cast_test();
 
     print("OK\n");
     0

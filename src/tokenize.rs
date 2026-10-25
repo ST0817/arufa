@@ -94,6 +94,7 @@ fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
         keyword("or").to(Or),
         keyword("if").to(If),
         keyword("else").to(Else),
+        keyword("as").to(As),
         keyword("var").to(Var),
         keyword("fn").to(Fn),
         keyword("extern").to(Extern),

@@ -99,11 +99,11 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         Value::new(basic_value, Type::Unit)
     }
 
-    fn compile_int_expr(&self, value: u32) -> Result<Value<'ctx>, Error> {
+    fn compile_int_expr(&self, value: u64) -> Result<Value<'ctx>, Error> {
         let basic_value = self
             .context
             .i32_type()
-            .const_int(value as u64, false)
+            .const_int(value, false)
             .as_basic_value_enum();
         Ok(Value::new(basic_value, Type::I32))
     }
@@ -176,7 +176,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                 .builder
                 .build_xor(lhs_int_value, rhs_int_value, "xor")?,
         };
-        Ok(Value::new(int_value.into(), Type::I32))
+        Ok(Value::new(int_value.into(), lhs_value.ty))
     }
 
     fn compile_shift_bin_expr(
@@ -202,7 +202,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                     .build_right_shift(lhs_int_value, rhs_int_value, true, "right_shift")?
             }
         };
-        Ok(Value::new(int_value.into(), Type::I32))
+        Ok(Value::new(int_value.into(), lhs_value.ty))
     }
 
     fn compile_cmp_bin_expr(
@@ -380,6 +380,34 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .unwrap_or(self.unit_value()))
     }
 
+    fn compile_as_expr(
+        &self,
+        expr: &Expr<'src>,
+        ty: Type,
+        span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        use Type::*;
+        let value = self.compile_expr(expr, scope)?;
+        if matches!(value.ty, Unit | Str) | matches!(ty, Unit | Str) {
+            return Err(CheckError::new(
+                CannotBeCast {
+                    from: value.ty,
+                    to: ty,
+                },
+                *span,
+            )
+            .into());
+        }
+        let basic_value = self.builder.build_int_cast_sign_flag(
+            value.basic_value.into_int_value(),
+            self.llvm_type_of(ty).into_int_type(),
+            value.ty.is_signed(),
+            "cast",
+        )?;
+        Ok(Value::new(basic_value.as_basic_value_enum(), ty))
+    }
+
     fn compile_expr(
         &self,
         expr: &Expr<'src>,
@@ -399,6 +427,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
             If(cond, then, els) => self.compile_if_expr(cond, then, els.as_ref(), scope),
             Call(name, args) => self.compile_call_expr(name, args, scope),
+            As(expr, ty, span) => self.compile_as_expr(expr, *ty, span, scope),
         }
     }
 
@@ -408,7 +437,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         ty: Type,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<(), Error> {
-        let value = self.builder.build_alloca(self.context.i32_type(), name)?;
+        let value = self.builder.build_alloca(self.llvm_type_of(ty), name)?;
         scope.push(Var::new(name, value, ty));
         Ok(())
     }

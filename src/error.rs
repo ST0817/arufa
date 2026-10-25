@@ -17,6 +17,7 @@ pub enum CheckErrorKind {
     UndefinedVariable,
     TypeMismatch { expected: Type, found: Type },
     NotIntType(Type),
+    CannotBeCast { from: Type, to: Type },
     UndefinedFunction,
     ArgNumMismatch,
     AlreadyDefined,
@@ -32,6 +33,7 @@ impl Display for CheckErrorKind {
                 write!(f, "type mismatch: expected {expected}, found {found}")
             }
             NotIntType(ty) => write!(f, "{ty} is not an integer type"),
+            CannotBeCast { from, to } => write!(f, "{from} cannot be cast to {to}"),
             UndefinedFunction => f.write_str("undefined function"),
             ArgNumMismatch => f.write_str("the number of arguments does not match"),
             AlreadyDefined => f.write_str("already defined"),

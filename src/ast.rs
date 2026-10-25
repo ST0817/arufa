@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use chumsky::span::Spanned;
+use chumsky::span::{SimpleSpan, Spanned};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
@@ -21,6 +21,11 @@ impl Type {
     pub fn is_int(self) -> bool {
         use Type::*;
         matches!(self, U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64)
+    }
+
+    pub fn is_signed(self) -> bool {
+        use Type::*;
+        matches!(self, I8 | I16 | I32 | I64)
     }
 }
 
@@ -85,7 +90,7 @@ pub enum UnaryOp {
 
 #[derive(Debug)]
 pub enum Expr<'src> {
-    Int(u32),
+    Int(u64),
     Bool(bool),
     Str(String),
     Unit,
@@ -101,6 +106,7 @@ pub enum Expr<'src> {
         Option<Spanned<Block<'src>>>,
     ),
     Call(Spanned<&'src str>, Spanned<Vec<Spanned<Self>>>),
+    As(Box<Self>, Type, SimpleSpan),
 }
 
 #[derive(Debug)]

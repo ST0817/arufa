@@ -3,7 +3,7 @@ use chumsky::{
     error::Rich,
     extra::Err,
     input::{Input, ValueInput},
-    pratt::{Associativity, Operator as ChumskyOperator, infix, left, prefix},
+    pratt::{Associativity, Operator as ChumskyOperator, infix, left, postfix, prefix},
     primitive::{choice, empty, just},
     recursive::Recursive,
     select,
@@ -145,10 +145,20 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         Expr::{ArithBin, CmpBin, LogicBin, ShiftBin},
         Token::*,
     };
+    let as_op = |prec| {
+        postfix(
+            prec,
+            just(As).ignore_then(ty()),
+            |expr: Spanned<_>, ty, extra| {
+                Expr::As(Box::new(expr.inner), ty, extra.span()).with_span(extra.span())
+            },
+        )
+    };
     expr.spanned()
         .pratt((
-            prefix_op(9, Minus, UnaryOp::Neg),
-            prefix_op(9, Not, UnaryOp::Not),
+            prefix_op(10, Minus, UnaryOp::Neg),
+            prefix_op(10, Not, UnaryOp::Not),
+            as_op(9),
             infix_op(left(8), Star, ArithBinOp::Mul, ArithBin),
             infix_op(left(8), Slash, ArithBinOp::Div, ArithBin),
             infix_op(left(8), Perc, ArithBinOp::Mod, ArithBin),

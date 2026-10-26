@@ -2,7 +2,15 @@ use std::fmt::{self, Display, Formatter};
 
 use chumsky::span::{SimpleSpan, Spanned};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
+pub enum TypeClass {
+    Int,
+    Bool,
+    Ptr,
+    Unit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     U8,
     U16,
@@ -15,17 +23,23 @@ pub enum Type {
     Bool,
     Str,
     Unit,
+    Ptr(Box<Self>),
 }
 
 impl Type {
-    pub fn is_int(self) -> bool {
-        use Type::*;
-        matches!(self, U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64)
-    }
-
-    pub fn is_signed(self) -> bool {
+    pub fn is_signed(&self) -> bool {
         use Type::*;
         matches!(self, I8 | I16 | I32 | I64)
+    }
+
+    pub fn class(&self) -> TypeClass {
+        use Type::*;
+        match self {
+            U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 => TypeClass::Int,
+            Bool => TypeClass::Bool,
+            Str | Ptr(_) => TypeClass::Ptr,
+            Unit => TypeClass::Unit,
+        }
     }
 }
 
@@ -44,6 +58,7 @@ impl Display for Type {
             Bool => f.write_str("bool"),
             Str => f.write_str("str"),
             Unit => f.write_str("()"),
+            Ptr(ty) => write!(f, "{ty}*"),
         }
     }
 }
@@ -82,12 +97,6 @@ pub enum LogicBinOp {
     Or,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum UnaryOp {
-    Neg,
-    Not,
-}
-
 #[derive(Debug)]
 pub enum Expr<'src> {
     Int(u64),
@@ -99,7 +108,10 @@ pub enum Expr<'src> {
     ShiftBin(Spanned<Box<Self>>, ShiftBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     LogicBin(Spanned<Box<Self>>, LogicBinOp, Spanned<Box<Self>>),
-    Unary(Spanned<Box<Self>>, UnaryOp),
+    Neg(Spanned<Box<Self>>),
+    Not(Spanned<Box<Self>>),
+    Ref(Spanned<Box<Self>>),
+    Deref(Spanned<Box<Self>>),
     If(
         Spanned<Box<Self>>,
         Spanned<Block<'src>>,
@@ -112,7 +124,7 @@ pub enum Expr<'src> {
 #[derive(Debug)]
 pub enum Stmt<'src> {
     Var(&'src str, Type),
-    Assign(Spanned<&'src str>, Spanned<Expr<'src>>),
+    Assign(Spanned<Expr<'src>>, Spanned<Expr<'src>>),
     Expr(Expr<'src>),
 }
 
@@ -151,8 +163,8 @@ impl<'src> Param<'src> {
         self.name
     }
 
-    pub fn ty(&self) -> Type {
-        self.ty
+    pub fn ty(&self) -> &Type {
+        &self.ty
     }
 }
 

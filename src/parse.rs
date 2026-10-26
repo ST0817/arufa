@@ -12,9 +12,7 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{
-        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type, UnaryOp,
-    },
+    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type},
     error::Error,
     token::Token::{self, LParen, RParen},
 };
@@ -49,8 +47,8 @@ fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     select! { Token::Name(ident) => ident }.labelled(TextExpected::<()>::AnyIdentifier)
 }
 
-fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
-{
+fn atom_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Type> {
     choice((
         just(Token::U8).to(Type::U8),
         just(Token::U16).to(Type::U16),
@@ -64,7 +62,22 @@ fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'to
         just(Token::Str).to(Type::Str),
         parens(empty()).to(Type::Unit),
     ))
-    .labelled("type")
+}
+
+fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
+{
+    let mut ty = Recursive::declare();
+    ty.define({
+        let atom = atom_type();
+        choice((
+            atom.clone()
+                .map(Box::new)
+                .then_ignore(just(Token::Star))
+                .map(Type::Ptr),
+            atom,
+        ))
+    });
+    ty
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -115,14 +128,13 @@ fn var_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 }
 
 fn prefix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
-    prec: u16,
     op_token: Token<'src>,
-    op: UnaryOp,
+    map: impl Fn(Spanned<Box<Expr<'src>>>) -> Expr<'src> + Clone,
 ) -> impl Operator<'tokens, 'src, I, Spanned<Expr<'src>>> {
     prefix(
-        prec,
-        just(op_token).to(op).labelled("prefix operator"),
-        |op, expr, extra| Expr::Unary(box_spanned(expr), op).with_span(extra.span()),
+        10,
+        just(op_token).labelled("prefix operator"),
+        move |_, expr, extra| map(box_spanned(expr)).with_span(extra.span()),
     )
 }
 
@@ -159,8 +171,10 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     };
     expr.spanned()
         .pratt((
-            prefix_op(10, Minus, UnaryOp::Neg),
-            prefix_op(10, Not, UnaryOp::Not),
+            prefix_op(Minus, Expr::Neg),
+            prefix_op(Not, Expr::Not),
+            prefix_op(Amp, Expr::Ref),
+            prefix_op(Star, Expr::Deref),
             as_op(9),
             infix_op(left(8), Star, ArithBinOp::Mul, ArithBin),
             infix_op(left(8), Slash, ArithBinOp::Div, ArithBin),
@@ -199,11 +213,11 @@ fn assign_stmt<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Stmt<'src>> {
     use Token::*;
-    name()
+    expr.clone()
         .spanned()
         .then_ignore(just(Assign))
         .then(expr.spanned())
-        .map(|(name, expr)| Stmt::Assign(name, expr))
+        .map(|(target, value)| Stmt::Assign(target, value))
         .then_ignore(just(Semic))
 }
 

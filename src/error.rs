@@ -12,11 +12,13 @@ use thiserror::Error;
 
 use crate::{ast::Type, token::Token};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum CheckErrorKind {
     UndefinedVariable,
     TypeMismatch { expected: Type, found: Type },
+    CannotGetAddress,
     NotIntType(Type),
+    NotPtrType(Type),
     CannotBeCast { from: Type, to: Type },
     UndefinedFunction,
     ArgNumMismatch,
@@ -32,7 +34,9 @@ impl Display for CheckErrorKind {
             TypeMismatch { expected, found } => {
                 write!(f, "type mismatch: expected {expected}, found {found}")
             }
+            CannotGetAddress => f.write_str("cannot get address"),
             NotIntType(ty) => write!(f, "{ty} is not an integer type"),
+            NotPtrType(ty) => write!(f, "{ty} is not a pointer type"),
             CannotBeCast { from, to } => write!(f, "{from} cannot be cast to {to}"),
             UndefinedFunction => f.write_str("undefined function"),
             ArgNumMismatch => f.write_str("the number of arguments does not match"),
@@ -53,8 +57,8 @@ impl CheckError {
         Self { kind, span }
     }
 
-    pub fn kind(&self) -> CheckErrorKind {
-        self.kind
+    pub fn kind(&self) -> &CheckErrorKind {
+        &self.kind
     }
 
     pub fn span(&self) -> &SimpleSpan {

@@ -24,8 +24,8 @@ impl<'src, 'ctx> Var<'src, 'ctx> {
         self.ptr_value
     }
 
-    pub fn ty(&self) -> Type {
-        self.ty
+    pub fn ty(&self) -> &Type {
+        &self.ty
     }
 }
 

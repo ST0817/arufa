@@ -7,12 +7,13 @@ use inkwell::{
     context::Context,
     module::Module,
     types::{BasicType, BasicTypeEnum},
-    values::{BasicValue, BasicValueEnum, FunctionValue},
+    values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue},
 };
 
 use crate::{
     ast::{
-        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type, UnaryOp,
+        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type,
+        TypeClass,
     },
     error::{CheckError, CheckErrorKind::*, Error},
     func_defs::{FuncDef, FuncDefs, FuncSig},
@@ -21,28 +22,35 @@ use crate::{
 
 fn find_var<'src, 'ctx>(
     name: &Spanned<&'src str>,
-    scope: &mut Scope<'src, 'ctx>,
+    scope: &Scope<'src, 'ctx>,
 ) -> Result<Rc<Var<'src, 'ctx>>, Error> {
     scope
         .find(name)
         .ok_or_else(|| CheckError::new(UndefinedVariable, name.span).into())
 }
 
-fn check_type_match(expected: Type, found: Type, span: &SimpleSpan) -> Result<(), Error> {
+fn check_type_match(expected: &Type, found: &Type, span: &SimpleSpan) -> Result<(), Error> {
     if expected != found {
-        return Err(CheckError::new(TypeMismatch { expected, found }, *span).into());
+        return Err(CheckError::new(
+            TypeMismatch {
+                expected: expected.clone(),
+                found: found.clone(),
+            },
+            *span,
+        )
+        .into());
     }
     Ok(())
 }
 
-fn check_bool_type(ty: Type, span: &SimpleSpan) -> Result<(), Error> {
-    check_type_match(Type::Bool, ty, span)
+fn check_bool_type(ty: &Type, span: &SimpleSpan) -> Result<(), Error> {
+    check_type_match(&Type::Bool, ty, span)
 }
 
-fn check_int_type(ty: Type, span: &SimpleSpan) -> Result<(), Error> {
-    if !ty.is_int() {
-        return Err(CheckError::new(NotIntType(ty), *span).into());
-    }
+fn check_int_type(ty: &Type, span: &SimpleSpan) -> Result<(), Error> {
+    let TypeClass::Int = ty.class() else {
+        return Err(CheckError::new(NotIntType(ty.clone()), *span).into());
+    };
     Ok(())
 }
 
@@ -55,6 +63,18 @@ struct Value<'ctx> {
 impl<'ctx> Value<'ctx> {
     fn new(basic_value: BasicValueEnum<'ctx>, ty: Type) -> Self {
         Self { basic_value, ty }
+    }
+}
+
+#[derive(Debug)]
+struct AddrValue<'ctx> {
+    ptr_value: PointerValue<'ctx>,
+    ptr_of: Type,
+}
+
+impl<'ctx> AddrValue<'ctx> {
+    fn new(ptr_value: PointerValue<'ctx>, ptr_of: Type) -> Self {
+        Self { ptr_value, ptr_of }
     }
 }
 
@@ -78,7 +98,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         }
     }
 
-    fn llvm_type_of(&self, ty: Type) -> BasicTypeEnum<'ctx> {
+    fn llvm_type_of(&self, ty: &Type) -> BasicTypeEnum<'ctx> {
         use Type::*;
         match ty {
             U8 | I8 => self.context.i8_type().as_basic_type_enum(),
@@ -86,7 +106,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             U32 | I32 => self.context.i32_type().as_basic_type_enum(),
             U64 | I64 => self.context.i64_type().as_basic_type_enum(),
             Bool => self.context.bool_type().as_basic_type_enum(),
-            Str => self
+            Ptr(_) | Str => self
                 .context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
@@ -97,6 +117,42 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn unit_value(&self) -> Value<'ctx> {
         let basic_value = self.context.const_struct(&[], false).as_basic_value_enum();
         Value::new(basic_value, Type::Unit)
+    }
+
+    fn compile_var_addr(
+        &self,
+        name: &Spanned<&str>,
+        scope: &Scope<'src, 'ctx>,
+    ) -> Result<AddrValue<'ctx>, Error> {
+        let var = find_var(name, scope)?;
+        Ok(AddrValue::new(var.ptr_value(), var.ty().clone()))
+    }
+
+    fn compile_deref_addr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<AddrValue<'ctx>, Error> {
+        let value = self.compile_expr(expr, scope)?;
+        let Type::Ptr(ty) = value.ty else {
+            return Err(CheckError::new(NotPtrType(value.ty), *expr_span).into());
+        };
+        Ok(AddrValue::new(value.basic_value.into_pointer_value(), *ty))
+    }
+
+    fn compile_addr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<AddrValue<'ctx>, Error> {
+        use Expr::*;
+        match expr {
+            Var(name) => self.compile_var_addr(name, scope),
+            Deref(expr) => self.compile_deref_addr(expr, &expr.span, scope),
+            _ => Err(CheckError::new(CannotGetAddress, *expr_span).into()),
+        }
     }
 
     fn compile_int_expr(&self, value: u64) -> Result<Value<'ctx>, Error> {
@@ -135,22 +191,24 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         let basic_value =
             self.builder
                 .build_load(self.llvm_type_of(var.ty()), var.ptr_value(), "deref")?;
-        Ok(Value::new(basic_value, var.ty()))
+        Ok(Value::new(basic_value, var.ty().clone()))
     }
 
     fn compile_arith_bin_expr(
         &self,
-        lhs: &Spanned<Box<Expr<'src>>>,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
         op: ArithBinOp,
-        rhs: &Spanned<Box<Expr<'src>>>,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
         use ArithBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_int_type(lhs_value.ty, &lhs.span)?;
+        check_int_type(&lhs_value.ty, lhs_span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_type_match(lhs_value.ty, rhs_value.ty, &rhs.span)?;
+        check_type_match(&lhs_value.ty, &rhs_value.ty, rhs_span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             Add => self
@@ -181,17 +239,19 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 
     fn compile_shift_bin_expr(
         &self,
-        lhs: &Spanned<Box<Expr<'src>>>,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
         op: ShiftBinOp,
-        rhs: &Spanned<Box<Expr<'src>>>,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
         use ShiftBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_int_type(lhs_value.ty, &lhs.span)?;
+        check_int_type(&lhs_value.ty, lhs_span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_int_type(rhs_value.ty, &rhs.span)?;
+        check_int_type(&rhs_value.ty, rhs_span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             LShift => self
@@ -207,17 +267,19 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 
     fn compile_cmp_bin_expr(
         &self,
-        lhs: &Spanned<Box<Expr<'src>>>,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
         op: CmpBinOp,
-        rhs: &Spanned<Box<Expr<'src>>>,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
         use CmpBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_int_type(lhs_value.ty, &lhs.span)?;
+        check_int_type(&lhs_value.ty, lhs_span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_int_type(rhs_value.ty, &rhs.span)?;
+        check_int_type(&rhs_value.ty, rhs_span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = self.builder.build_int_compare(
             match op {
@@ -237,17 +299,19 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 
     fn compile_logic_bin_expr(
         &self,
-        lhs: &Spanned<Box<Expr<'src>>>,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
         op: LogicBinOp,
-        rhs: &Spanned<Box<Expr<'src>>>,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
         use LogicBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
-        check_bool_type(lhs_value.ty, &lhs.span)?;
+        check_bool_type(&lhs_value.ty, lhs_span)?;
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_bool_type(rhs_value.ty, &rhs.span)?;
+        check_bool_type(&rhs_value.ty, rhs_span)?;
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = match op {
             And => self
@@ -260,32 +324,64 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         Ok(Value::new(int_value.into(), Type::Bool))
     }
 
-    fn compile_unary_expr(
+    fn compile_neg_expr(
         &self,
-        expr: &Spanned<Box<Expr<'src>>>,
-        op: UnaryOp,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        use UnaryOp::*;
         let expr_value = self.compile_expr(expr, scope)?;
         let expr_int_value = expr_value.basic_value.into_int_value();
-        match op {
-            Neg => {
-                check_int_type(expr_value.ty, &expr.span)?;
-                let int_value = self.builder.build_int_neg(expr_int_value, "neg")?;
-                Ok(Value::new(int_value.into(), Type::I32))
-            }
-            Not => {
-                check_bool_type(expr_value.ty, &expr.span)?;
-                let int_value = self.builder.build_not(expr_int_value, "not")?;
-                Ok(Value::new(int_value.into(), Type::Bool))
-            }
-        }
+        check_int_type(&expr_value.ty, expr_span)?;
+        let int_value = self.builder.build_int_neg(expr_int_value, "neg")?;
+        Ok(Value::new(int_value.into(), Type::I32))
+    }
+
+    fn compile_not_expr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        let expr_value = self.compile_expr(expr, scope)?;
+        let expr_int_value = expr_value.basic_value.into_int_value();
+        check_bool_type(&expr_value.ty, expr_span)?;
+        let int_value = self.builder.build_not(expr_int_value, "not")?;
+        Ok(Value::new(int_value.into(), Type::Bool))
+    }
+
+    fn compile_ref_expr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        let addr_value = self.compile_addr(expr, expr_span, scope)?;
+        Ok(Value::new(
+            addr_value.ptr_value.as_basic_value_enum(),
+            Type::Ptr(Box::new(addr_value.ptr_of)),
+        ))
+    }
+
+    fn compile_deref_expr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src, 'ctx>,
+    ) -> Result<Value<'ctx>, Error> {
+        let addr_value = self.compile_deref_addr(expr, expr_span, scope)?;
+        let basic_value = self.builder.build_load(
+            self.llvm_type_of(&addr_value.ptr_of),
+            addr_value.ptr_value,
+            "deref",
+        )?;
+        Ok(Value::new(basic_value, addr_value.ptr_of))
     }
 
     fn compile_if_expr(
         &self,
-        cond: &Spanned<Box<Expr<'src>>>,
+        cond: &Expr<'src>,
+        cond_span: &SimpleSpan,
         then: &Spanned<Block<'src>>,
         els: Option<&Spanned<Block<'src>>>,
         scope: &mut Scope<'src, 'ctx>,
@@ -298,7 +394,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             let merge_block = self.context.append_basic_block(func_value, "merge");
 
             let cond_value = self.compile_expr(cond, scope)?;
-            check_bool_type(cond_value.ty, &cond.span)?;
+            check_bool_type(&cond_value.ty, cond_span)?;
             self.builder.build_conditional_branch(
                 cond_value.basic_value.into_int_value(),
                 then_block,
@@ -312,13 +408,13 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 
             self.builder.position_at_end(else_block);
             let else_value = self.compile_block(els, scope)?;
-            check_type_match(then_value.ty, else_value.ty, &els.span)?;
+            check_type_match(&then_value.ty, &else_value.ty, &els.span)?;
             self.builder.build_unconditional_branch(merge_block)?;
             let else_end = self.builder.get_insert_block().unwrap();
 
             self.builder.position_at_end(merge_block);
             let ty = then_value.ty;
-            let phi = self.builder.build_phi(self.llvm_type_of(ty), "if")?;
+            let phi = self.builder.build_phi(self.llvm_type_of(&ty), "if")?;
             phi.add_incoming(&[
                 (&then_value.basic_value, then_end),
                 (&else_value.basic_value, else_end),
@@ -329,7 +425,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             let merge_block = self.context.append_basic_block(func_value, "merge");
 
             let cond_value = self.compile_expr(cond, scope)?;
-            check_bool_type(cond_value.ty, &cond.span)?;
+            check_bool_type(&cond_value.ty, cond_span)?;
             self.builder.build_conditional_branch(
                 cond_value.basic_value.into_int_value(),
                 then_block,
@@ -338,7 +434,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
 
             self.builder.position_at_end(then_block);
             let then_value = self.compile_block(then, scope)?;
-            check_type_match(Type::Unit, then_value.ty, &then.span)?;
+            check_type_match(&Type::Unit, &then_value.ty, &then.span)?;
             self.builder.build_unconditional_branch(merge_block)?;
 
             self.builder.position_at_end(merge_block);
@@ -363,7 +459,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .map(|arg| Ok(self.compile_expr(arg, scope)?.with_span(arg.span)))
             .collect::<Result<Vec<Spanned<Value>>, Error>>()?;
         for (arg_value, param_type) in zip(&arg_values, func_def.sig().params()) {
-            check_type_match(*param_type, arg_value.ty, &arg_value.span)?;
+            check_type_match(param_type, &arg_value.ty, &arg_value.span)?;
         }
         let call_value = self.builder.build_call(
             func_def.value(),
@@ -376,36 +472,58 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         Ok(call_value
             .try_as_basic_value()
             .basic()
-            .map(|basic_value| Value::new(basic_value, func_def.sig().ret()))
+            .map(|basic_value| Value::new(basic_value, func_def.sig().ret().clone()))
             .unwrap_or(self.unit_value()))
     }
 
     fn compile_as_expr(
         &self,
         expr: &Expr<'src>,
-        ty: Type,
+        ty: &Type,
         span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        use Type::*;
+        use TypeClass::*;
         let value = self.compile_expr(expr, scope)?;
-        if matches!(value.ty, Unit | Str) | matches!(ty, Unit | Str) {
-            return Err(CheckError::new(
-                CannotBeCast {
-                    from: value.ty,
-                    to: ty,
-                },
-                *span,
-            )
-            .into());
-        }
-        let basic_value = self.builder.build_int_cast_sign_flag(
-            value.basic_value.into_int_value(),
-            self.llvm_type_of(ty).into_int_type(),
-            value.ty.is_signed(),
-            "cast",
-        )?;
-        Ok(Value::new(basic_value.as_basic_value_enum(), ty))
+        let basic_value = match (value.ty.class(), ty.class()) {
+            (Unit, _) | (_, Unit) => {
+                return Err(CheckError::new(
+                    CannotBeCast {
+                        from: value.ty,
+                        to: ty.clone(),
+                    },
+                    *span,
+                )
+                .into());
+            }
+            (Int | Bool, Int | Bool) => self
+                .builder
+                .build_int_cast_sign_flag(
+                    value.basic_value.into_int_value(),
+                    self.llvm_type_of(ty).into_int_type(),
+                    value.ty.is_signed(),
+                    "cast",
+                )?
+                .as_basic_value_enum(),
+            (Ptr, Int | Bool) => self
+                .builder
+                .build_ptr_to_int(
+                    value.basic_value.into_pointer_value(),
+                    self.llvm_type_of(ty).into_int_type(),
+                    "cast",
+                )?
+                .as_basic_value_enum(),
+            (Int | Bool, Ptr) => self
+                .builder
+                .build_int_to_ptr(
+                    value.basic_value.into_int_value(),
+                    self.llvm_type_of(ty).into_pointer_type(),
+                    "cast",
+                )?
+                .as_basic_value_enum(),
+            (Ptr, Ptr) => value.basic_value,
+        };
+        Ok(Value::new(basic_value, ty.clone()))
     }
 
     fn compile_expr(
@@ -420,39 +538,52 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             Str(value) => self.compile_str_expr(value),
             Unit => self.compile_unit_expr(),
             Var(name) => self.compile_var_expr(name, scope),
-            ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, scope),
-            ShiftBin(lhs, op, rhs) => self.compile_shift_bin_expr(lhs, *op, rhs, scope),
-            CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, scope),
-            LogicBin(lhs, op, rhs) => self.compile_logic_bin_expr(lhs, *op, rhs, scope),
-            Unary(expr, op) => self.compile_unary_expr(expr, *op, scope),
-            If(cond, then, els) => self.compile_if_expr(cond, then, els.as_ref(), scope),
+            ArithBin(lhs, op, rhs) => {
+                self.compile_arith_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            ShiftBin(lhs, op, rhs) => {
+                self.compile_shift_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            CmpBin(lhs, op, rhs) => {
+                self.compile_cmp_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            LogicBin(lhs, op, rhs) => {
+                self.compile_logic_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            Neg(expr) => self.compile_neg_expr(expr, &expr.span, scope),
+            Not(expr) => self.compile_not_expr(expr, &expr.span, scope),
+            Ref(expr) => self.compile_ref_expr(expr, &expr.span, scope),
+            Deref(expr) => self.compile_deref_expr(expr, &expr.span, scope),
+            If(cond, then, els) => {
+                self.compile_if_expr(cond, &cond.span, then, els.as_ref(), scope)
+            }
             Call(name, args) => self.compile_call_expr(name, args, scope),
-            As(expr, ty, span) => self.compile_as_expr(expr, *ty, span, scope),
+            As(expr, ty, span) => self.compile_as_expr(expr, ty, span, scope),
         }
     }
 
     fn compile_var_stmt(
         &self,
         name: &'src str,
-        ty: Type,
+        ty: &Type,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<(), Error> {
         let value = self.builder.build_alloca(self.llvm_type_of(ty), name)?;
-        scope.push(Var::new(name, value, ty));
+        scope.push(Var::new(name, value, ty.clone()));
         Ok(())
     }
 
     fn compile_assign_stmt(
         &self,
-        name: &Spanned<&'src str>,
+        target: &Spanned<Expr<'src>>,
         expr: &Spanned<Expr<'src>>,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<(), Error> {
-        let var = find_var(name, scope)?;
+        let addr_value = self.compile_addr(target, &target.span, scope)?;
         let value = self.compile_expr(expr, scope)?;
-        check_type_match(var.ty(), value.ty, &expr.span)?;
+        check_type_match(&addr_value.ptr_of, &value.ty, &expr.span)?;
         self.builder
-            .build_store(var.ptr_value(), value.basic_value)?;
+            .build_store(addr_value.ptr_value, value.basic_value)?;
         Ok(())
     }
 
@@ -468,7 +599,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn compile_stmt(&self, stmt: &Stmt<'src>, scope: &mut Scope<'src, 'ctx>) -> Result<(), Error> {
         use Stmt::*;
         match stmt {
-            Var(name, ty) => self.compile_var_stmt(name, *ty, scope),
+            Var(name, ty) => self.compile_var_stmt(name, ty, scope),
             Assign(name, expr) => self.compile_assign_stmt(name, expr, scope),
             Expr(expr) => self.compile_expr_stmt(expr, scope),
         }
@@ -493,14 +624,14 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         &mut self,
         name: &Spanned<&'src str>,
         param_types: Vec<Type>,
-        ret_type: Type,
+        ret_type: &Type,
     ) -> Result<FunctionValue<'ctx>, Error> {
         let None = self.func_defs.get(name) else {
             return Err(CheckError::new(AlreadyDefined, name.span).into());
         };
         let llvm_param_types = param_types
             .iter()
-            .map(|param_type| self.llvm_type_of(*param_type).into())
+            .map(|param_type| self.llvm_type_of(param_type).into())
             .collect::<Vec<_>>();
         let llvm_func_type = if let Type::Unit = ret_type {
             self.context.void_type().fn_type(&llvm_param_types, false)
@@ -511,7 +642,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         let func_value = self.module.add_function(name, llvm_func_type, None);
         self.func_defs.insert(
             name,
-            FuncDef::new(func_value, FuncSig::new(param_types, ret_type)),
+            FuncDef::new(func_value, FuncSig::new(param_types, ret_type.clone())),
         );
         Ok(func_value)
     }
@@ -520,10 +651,13 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         &mut self,
         name: &Spanned<&'src str>,
         params: &[Param<'src>],
-        ret_type: Type,
+        ret_type: &Type,
         body: &Block<'src>,
     ) -> Result<(), Error> {
-        let param_types = params.iter().map(|param| param.ty()).collect::<Vec<_>>();
+        let param_types = params
+            .iter()
+            .map(|param| param.ty().clone())
+            .collect::<Vec<_>>();
         let func_value = self.define_func(name, param_types, ret_type)?;
         self.func_value = Some(func_value);
 
@@ -537,7 +671,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                 .build_alloca(self.llvm_type_of(param.ty()), param.name())?;
             let basic_value = func_value.get_nth_param(i as u32).unwrap();
             self.builder.build_store(ptr_value, basic_value)?;
-            scope.push(Var::new(param.name(), ptr_value, param.ty()));
+            scope.push(Var::new(param.name(), ptr_value, param.ty().clone()));
         }
 
         let ret_value = self.compile_block(body, &mut scope)?;
@@ -553,7 +687,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         &mut self,
         name: &Spanned<&'src str>,
         param_types: &[Type],
-        ret_type: Type,
+        ret_type: &Type,
     ) -> Result<(), Error> {
         self.define_func(name, param_types.to_vec(), ret_type)?;
         Ok(())
@@ -563,10 +697,10 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         use Item::*;
         match item {
             Func(name, params, ret_type, body) => {
-                self.compile_func_item(name, params, *ret_type, body)
+                self.compile_func_item(name, params, ret_type, body)
             }
             Extern(name, param_types, ret_type) => {
-                self.compile_extern_item(name, param_types, *ret_type)
+                self.compile_extern_item(name, param_types, ret_type)
             }
         }
     }

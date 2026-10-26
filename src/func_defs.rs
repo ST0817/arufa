@@ -19,8 +19,8 @@ impl FuncSig {
         &self.params
     }
 
-    pub fn ret(&self) -> Type {
-        self.ret
+    pub fn ret(&self) -> &Type {
+        &self.ret
     }
 }
 

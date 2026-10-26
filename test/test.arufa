@@ -73,8 +73,16 @@ fn unary_test() {
 
 fn var_test() {
     var a: i32;
+    var b: i32*;
     a = 42;
     assert_i32("variable", a, 42);
+    b = &a;
+    *b = 53;
+    assert_i32("pointer assignment", a, 53);
+    var c: u64;
+    c = b as u64;
+    *(c as i32*) = 57;
+    assert_i32("pointer cast", a, 57);
 }
 
 fn if_test() {

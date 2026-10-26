@@ -13,7 +13,7 @@ use inkwell::{
 use crate::{
     ast::{
         ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type,
-        TypeClass,
+        TypeKind,
     },
     error::{CheckError, CheckErrorKind::*, Error},
     func_defs::{FuncDef, FuncDefs, FuncSig},
@@ -48,7 +48,7 @@ fn check_bool_type(ty: &Type, span: &SimpleSpan) -> Result<(), Error> {
 }
 
 fn check_int_type(ty: &Type, span: &SimpleSpan) -> Result<(), Error> {
-    let TypeClass::Int = ty.class() else {
+    let TypeKind::Int = ty.kind() else {
         return Err(CheckError::new(NotIntType(ty.clone()), *span).into());
     };
     Ok(())
@@ -101,7 +101,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn llvm_type_of(&self, ty: &Type) -> BasicTypeEnum<'ctx> {
         use Type::*;
         match ty {
-            U8 | I8 => self.context.i8_type().as_basic_type_enum(),
+            U8 | I8 | Char => self.context.i8_type().as_basic_type_enum(),
             U16 | I16 => self.context.i16_type().as_basic_type_enum(),
             U32 | I32 => self.context.i32_type().as_basic_type_enum(),
             U64 | I64 => self.context.i64_type().as_basic_type_enum(),
@@ -162,6 +162,15 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             .const_int(value, false)
             .as_basic_value_enum();
         Ok(Value::new(basic_value, Type::I32))
+    }
+
+    fn compile_char_expr(&self, value: char) -> Result<Value<'ctx>, Error> {
+        let basic_value = self
+            .context
+            .i8_type()
+            .const_int(value as u64, false)
+            .as_basic_value_enum();
+        Ok(Value::new(basic_value, Type::Char))
     }
 
     fn compile_bool_expr(&self, value: bool) -> Result<Value<'ctx>, Error> {
@@ -268,7 +277,6 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     fn compile_cmp_bin_expr(
         &self,
         lhs: &Expr<'src>,
-        lhs_span: &SimpleSpan,
         op: CmpBinOp,
         rhs: &Expr<'src>,
         rhs_span: &SimpleSpan,
@@ -276,10 +284,13 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
     ) -> Result<Value<'ctx>, Error> {
         use CmpBinOp::*;
         let lhs_value = self.compile_expr(lhs, scope)?;
-        check_int_type(&lhs_value.ty, lhs_span)?;
         let lhs_int_value = lhs_value.basic_value.into_int_value();
         let rhs_value = self.compile_expr(rhs, scope)?;
-        check_int_type(&rhs_value.ty, rhs_span)?;
+        if !lhs_value.ty.is_comparable_to(&rhs_value.ty) {
+            return Err(
+                CheckError::new(CannotBeCompared(lhs_value.ty, rhs_value.ty), *rhs_span).into(),
+            );
+        }
         let rhs_int_value = rhs_value.basic_value.into_int_value();
         let int_value = self.builder.build_int_compare(
             match op {
@@ -483,9 +494,9 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         span: &SimpleSpan,
         scope: &mut Scope<'src, 'ctx>,
     ) -> Result<Value<'ctx>, Error> {
-        use TypeClass::*;
+        use TypeKind::*;
         let value = self.compile_expr(expr, scope)?;
-        let basic_value = match (value.ty.class(), ty.class()) {
+        let basic_value = match (value.ty.kind(), ty.kind()) {
             (Unit, _) | (_, Unit) => {
                 return Err(CheckError::new(
                     CannotBeCast {
@@ -496,7 +507,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                 )
                 .into());
             }
-            (Int | Bool, Int | Bool) => self
+            (Int | Bool | Char, Int | Bool | Char) => self
                 .builder
                 .build_int_cast_sign_flag(
                     value.basic_value.into_int_value(),
@@ -505,7 +516,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                     "cast",
                 )?
                 .as_basic_value_enum(),
-            (Ptr, Int | Bool) => self
+            (Ptr, Int | Bool | Char) => self
                 .builder
                 .build_ptr_to_int(
                     value.basic_value.into_pointer_value(),
@@ -513,7 +524,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
                     "cast",
                 )?
                 .as_basic_value_enum(),
-            (Int | Bool, Ptr) => self
+            (Int | Bool | Char, Ptr) => self
                 .builder
                 .build_int_to_ptr(
                     value.basic_value.into_int_value(),
@@ -535,6 +546,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
         match expr {
             Int(value) => self.compile_int_expr(*value),
             Bool(value) => self.compile_bool_expr(*value),
+            Char(value) => self.compile_char_expr(*value),
             Str(value) => self.compile_str_expr(value),
             Unit => self.compile_unit_expr(),
             Var(name) => self.compile_var_expr(name, scope),
@@ -544,9 +556,7 @@ impl<'src, 'ctx> Compiler<'src, 'ctx> {
             ShiftBin(lhs, op, rhs) => {
                 self.compile_shift_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
             }
-            CmpBin(lhs, op, rhs) => {
-                self.compile_cmp_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
-            }
+            CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, &rhs.span, scope),
             LogicBin(lhs, op, rhs) => {
                 self.compile_logic_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
             }

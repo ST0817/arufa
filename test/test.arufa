@@ -119,6 +119,13 @@ fn cast_test() {
     assert_i32("cast bool to i32", c as i32, 1);
 }
 
+fn char_test() {
+    var c: char;
+    c = 'A';
+    assert_i32("char cast to u8", c as i32, 65);
+    assert("char compare", 'A' < 'B');
+}
+
 fn main() -> i32 {
     bin_test();
     unary_test();
@@ -126,6 +133,7 @@ fn main() -> i32 {
     if_test();
     fn_test();
     cast_test();
+    char_test();
 
     print("OK\n");
     0

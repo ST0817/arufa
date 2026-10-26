@@ -14,7 +14,10 @@ use chumsky::{
 use crate::{
     ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type},
     error::Error,
-    token::Token::{self, LParen, RParen},
+    token::{
+        Lit,
+        Token::{self, LParen, RParen},
+    },
 };
 
 fn box_spanned<T>(value: Spanned<T>) -> Spanned<Box<T>> {
@@ -59,6 +62,7 @@ fn atom_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         just(Token::I32).to(Type::I32),
         just(Token::I64).to(Type::I64),
         just(Token::Bool).to(Type::Bool),
+        just(Token::Char).to(Type::Char),
         just(Token::Str).to(Type::Str),
         parens(empty()).to(Type::Unit),
     ))
@@ -82,7 +86,7 @@ fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'to
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    select! { Token::Int(value) => Expr::Int(value) }.labelled(TextExpected::<()>::Int)
+    select! { Token::Lit(Lit::Int(value)) => Expr::Int(value) }.labelled(TextExpected::<()>::Int)
 }
 
 fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -91,9 +95,14 @@ fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     choice((just(True).to(true), just(False).to(false))).map(Expr::Bool)
 }
 
+fn char_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Parser<'tokens, 'src, I, Expr<'src>> {
+    select! { Token::Lit(Lit::Char(value)) => Expr::Char(value) }
+}
+
 fn str_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    select! { Token::String(value) => Expr::Str(value) }
+    select! { Token::Lit(Lit::Str(value)) => Expr::Str(value) }
 }
 
 fn unit_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -291,6 +300,7 @@ fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         let atom = choice((
             int_expr(),
             bool_expr(),
+            char_expr(),
             str_expr(),
             unit_expr(),
             if_expr(expr.clone()),

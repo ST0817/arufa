@@ -3,9 +3,10 @@ use std::fmt::{self, Display, Formatter};
 use chumsky::span::{SimpleSpan, Spanned};
 
 #[derive(Debug, Clone, Copy)]
-pub enum TypeClass {
+pub enum TypeKind {
     Int,
     Bool,
+    Char,
     Ptr,
     Unit,
 }
@@ -21,6 +22,7 @@ pub enum Type {
     I32,
     I64,
     Bool,
+    Char,
     Str,
     Unit,
     Ptr(Box<Self>),
@@ -32,13 +34,20 @@ impl Type {
         matches!(self, I8 | I16 | I32 | I64)
     }
 
-    pub fn class(&self) -> TypeClass {
+    pub fn is_comparable_to(&self, other: &Type) -> bool {
+        use Type::*;
+        matches!((self.kind(), other.kind()), (TypeKind::Int, TypeKind::Int))
+            || matches!((self, other), (Char, Char))
+    }
+
+    pub fn kind(&self) -> TypeKind {
         use Type::*;
         match self {
-            U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 => TypeClass::Int,
-            Bool => TypeClass::Bool,
-            Str | Ptr(_) => TypeClass::Ptr,
-            Unit => TypeClass::Unit,
+            U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 => TypeKind::Int,
+            Bool => TypeKind::Bool,
+            Char => TypeKind::Char,
+            Str | Ptr(_) => TypeKind::Ptr,
+            Unit => TypeKind::Unit,
         }
     }
 }
@@ -56,6 +65,7 @@ impl Display for Type {
             I32 => f.write_str("i32"),
             I64 => f.write_str("i64"),
             Bool => f.write_str("bool"),
+            Char => f.write_str("char"),
             Str => f.write_str("str"),
             Unit => f.write_str("()"),
             Ptr(ty) => write!(f, "{ty}*"),
@@ -101,6 +111,7 @@ pub enum LogicBinOp {
 pub enum Expr<'src> {
     Int(u64),
     Bool(bool),
+    Char(char),
     Str(String),
     Unit,
     Var(Spanned<&'src str>),

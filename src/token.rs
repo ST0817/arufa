@@ -1,6 +1,24 @@
 use std::fmt::{self, Display, Formatter, Write};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Lit {
+    Int(u64),
+    Char(char),
+    Str(String),
+}
+
+impl Display for Lit {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        use Lit::*;
+        match self {
+            Int(value) => value.fmt(f),
+            Char(value) => write!(f, "'{value}'"),
+            Str(value) => write!(f, r#""{value}""#),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
     Plus,
     Arrow,
@@ -37,6 +55,7 @@ pub enum Token<'src> {
     I32,
     I64,
     Bool,
+    Char,
     Str,
     True,
     False,
@@ -48,8 +67,7 @@ pub enum Token<'src> {
     Var,
     Fn,
     Extern,
-    Int(u64),
-    String(String),
+    Lit(Lit),
     Name(&'src str),
 }
 
@@ -92,6 +110,7 @@ impl Display for Token<'_> {
             I32 => f.write_str("i32"),
             I64 => f.write_str("i64"),
             Bool => f.write_str("bool"),
+            Char => f.write_str("char"),
             Str => f.write_str("str"),
             True => f.write_str("true"),
             False => f.write_str("false"),
@@ -103,8 +122,7 @@ impl Display for Token<'_> {
             Var => f.write_str("var"),
             Fn => f.write_str("fn"),
             Extern => f.write_str("extern"),
-            Int(value) => write!(f, "{value}"),
-            String(value) => write!(f, r#""{value}""#),
+            Lit(lit) => lit.fmt(f),
             Name(name) => f.write_str(name),
         }
     }

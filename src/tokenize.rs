@@ -10,43 +10,13 @@ use chumsky::{
 
 use crate::{
     error::Error,
-    token::Token::{self, *},
+    token::{Lit, Token},
 };
 
 trait Tokenizer<'src, T> = Parser<'src, &'src str, T, Err<Rich<'src, char>>>;
 
-fn int<'src>() -> impl Tokenizer<'src, Token<'src>> {
-    text::int(10).from_str().unwrapped().map(Int)
-}
-
-fn escape<'src>() -> impl Tokenizer<'src, char> {
-    choice((
-        just(r#"\\"#).to('\\'),
-        just(r#"\n"#).to('\n'),
-        just(r#"\r"#).to('\r'),
-        just(r#"\t"#).to('\t'),
-        just(r#"\0"#).to('\0'),
-        just(r#"\'"#).to('\''),
-        just(r#"\""#).to('"'),
-    ))
-}
-
-fn str<'src>() -> impl Tokenizer<'src, Token<'src>> {
-    choice((escape(), none_of(r#"""#).filter(char::is_ascii)))
-        .repeated()
-        .collect()
-        .padded_by(just('"'))
-        .map(String)
-}
-
-fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
-    let head = any().filter(char::is_ascii_lowercase);
-    let tail = any()
-        .filter(|char: &char| char.is_ascii_lowercase() || char.is_ascii_digit() || *char == '_');
-    head.ignore_then(tail.repeated()).to_slice().map(Name)
-}
-
 fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    use Token::*;
     choice((
         just('+').to(Plus),
         just("->").to(Arrow),
@@ -78,6 +48,7 @@ fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {
 }
 
 fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    use Token::*;
     choice((
         keyword("u8").to(U8),
         keyword("u16").to(U16),
@@ -89,6 +60,7 @@ fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
         keyword("i64").to(I64),
         keyword("bool").to(Bool),
         keyword("str").to(Str),
+        keyword("char").to(Char),
         keyword("true").to(True),
         keyword("false").to(False),
         keyword("and").to(And),
@@ -100,6 +72,49 @@ fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
         keyword("fn").to(Fn),
         keyword("extern").to(Extern),
     ))
+}
+
+fn int_lit<'src>() -> impl Tokenizer<'src, Lit> {
+    text::int(10).from_str().unwrapped().map(Lit::Int)
+}
+
+fn escape<'src>() -> impl Tokenizer<'src, char> {
+    choice((
+        just(r#"\\"#).to('\\'),
+        just(r#"\n"#).to('\n'),
+        just(r#"\r"#).to('\r'),
+        just(r#"\t"#).to('\t'),
+        just(r#"\0"#).to('\0'),
+        just(r#"\'"#).to('\''),
+        just(r#"\""#).to('"'),
+    ))
+}
+
+fn char_lit<'src>() -> impl Tokenizer<'src, Lit> {
+    choice((escape(), none_of("'").filter(char::is_ascii)))
+        .padded_by(just("'"))
+        .map(Lit::Char)
+}
+
+fn str_lit<'src>() -> impl Tokenizer<'src, Lit> {
+    choice((escape(), none_of(r#"""#).filter(char::is_ascii)))
+        .repeated()
+        .collect()
+        .padded_by(just('"'))
+        .map(Lit::Str)
+}
+
+fn lits<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    choice((int_lit(), char_lit(), str_lit())).map(Token::Lit)
+}
+
+fn name<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    let head = any().filter(char::is_ascii_lowercase);
+    let tail = any()
+        .filter(|char: &char| char.is_ascii_lowercase() || char.is_ascii_digit() || *char == '_');
+    head.ignore_then(tail.repeated())
+        .to_slice()
+        .map(Token::Name)
 }
 
 fn line_comment<'src>() -> impl Tokenizer<'src, ()> {
@@ -128,7 +143,7 @@ fn skip<'src>() -> impl Tokenizer<'src, ()> {
 }
 
 fn tokenizer<'src>() -> impl Tokenizer<'src, Vec<Spanned<Token<'src>>>> {
-    choice((symbols(), keywords(), int(), str(), name()))
+    choice((symbols(), keywords(), lits(), name()))
         .spanned()
         .padded_by(skip())
         .repeated()

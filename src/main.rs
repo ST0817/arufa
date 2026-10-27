@@ -13,6 +13,7 @@ use crate::{
     emit::emit,
     error::{CheckError, Error},
     parse::parse,
+    resolve::resolve,
     tokenize::tokenize,
 };
 
@@ -24,6 +25,7 @@ mod compile;
 mod emit;
 mod error;
 mod parse;
+mod resolve;
 mod scope;
 mod symbols;
 mod token;
@@ -33,9 +35,10 @@ fn run(cli: &Cli, src: &mut String, src_path: &Path) -> Result<(), Error> {
     File::open(cli.src_path())?.read_to_string(src)?;
     let tokens = tokenize(src)?;
     let items = parse(&tokens, src)?;
+    let symbols = resolve(&items)?;
+    let checked_funcs = check(&items, &symbols)?;
     let context = Context::create();
-    let (checked_items, symbols) = check(&items)?;
-    let module = compile(&context, &symbols, src_path, &checked_items)?;
+    let module = compile(&context, &symbols, src_path, &checked_funcs)?;
     emit(cli, &module)?;
     Ok(())
 }

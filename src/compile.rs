@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, ops::Not, path::Path};
 
 use inkwell::{
     AddressSpace, IntPredicate,
@@ -12,8 +12,8 @@ use inkwell::{
 use crate::{
     ast::{ArithBinOp, CmpBinOp, LogicBinOp, ShiftBinOp, Type},
     checked_ast::{
-        CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedItem, CheckedLValueExpr,
-        CheckedLValueExprKind, CheckedParam, CheckedStmt,
+        CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedFunc, CheckedLValueExpr,
+        CheckedLValueExprKind, CheckedStmt,
     },
     error::Error,
     scope::VarId,
@@ -25,22 +25,20 @@ type Result<T> = std::result::Result<T, Error>;
 type Locals<'ctx> = HashMap<VarId, PointerValue<'ctx>>;
 
 #[derive(Debug)]
-struct Compiler<'src, 'ctx, 'symbols> {
+struct Compiler<'ctx> {
     context: &'ctx Context,
     builder: Builder<'ctx>,
     module: Module<'ctx>,
-    symbols: &'symbols Symbols<'src>,
     func_values: HashMap<FuncId, FunctionValue<'ctx>>,
     func_value: Option<FunctionValue<'ctx>>,
 }
 
-impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
-    fn new(context: &'ctx Context, symbols: &'symbols Symbols<'src>, src_path: &Path) -> Self {
+impl<'ctx> Compiler<'ctx> {
+    fn new(context: &'ctx Context, src_path: &Path) -> Self {
         Self {
             context,
             builder: context.create_builder(),
             module: context.create_module(&src_path.to_string_lossy()),
-            symbols,
             func_values: HashMap::new(),
             func_value: None,
         }
@@ -440,48 +438,37 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         }
     }
 
-    fn define_func(
-        &mut self,
-        id: FuncId,
-        param_types: Vec<Type>,
-        ret_type: &Type,
-    ) -> Result<FunctionValue<'ctx>> {
-        let llvm_param_types = param_types
-            .iter()
-            .map(|param_type| self.llvm_type_of(param_type).into())
-            .collect::<Vec<_>>();
-        let llvm_func_type = if let Type::Unit = ret_type {
-            self.context.void_type().fn_type(&llvm_param_types, false)
-        } else {
-            self.llvm_type_of(ret_type)
-                .fn_type(&llvm_param_types, false)
-        };
-        let func_value = self
-            .module
-            .add_function(self.symbols[id].name(), llvm_func_type, None);
-        self.func_values.insert(id, func_value);
-        Ok(func_value)
+    fn declare_funcs(&mut self, symbols: &Symbols) -> Result<()> {
+        for func_decl in symbols {
+            let llvm_param_types = func_decl
+                .sig()
+                .params()
+                .iter()
+                .map(|param_type| self.llvm_type_of(param_type).into())
+                .collect::<Vec<_>>();
+            let llvm_func_type = if let Type::Unit = func_decl.sig().ret() {
+                self.context.void_type().fn_type(&llvm_param_types, false)
+            } else {
+                self.llvm_type_of(func_decl.sig().ret())
+                    .fn_type(&llvm_param_types, false)
+            };
+            let func_value = self
+                .module
+                .add_function(func_decl.name(), llvm_func_type, None);
+            self.func_values.insert(func_decl.id(), func_value);
+        }
+        Ok(())
     }
 
-    fn compile_func_item(
-        &mut self,
-        id: FuncId,
-        params: &[CheckedParam],
-        ret_type: &Type,
-        body: &CheckedBlock,
-    ) -> Result<()> {
-        let param_types = params
-            .iter()
-            .map(|param| param.ty().clone())
-            .collect::<Vec<_>>();
-        let func_value = self.define_func(id, param_types, ret_type)?;
+    fn compile_func(&mut self, func: &CheckedFunc) -> Result<()> {
+        let func_value = self.func_values[&func.id()];
         self.func_value = Some(func_value);
 
         let mut locals = Locals::new();
         let entry = self.context.append_basic_block(func_value, "entry");
         self.builder.position_at_end(entry);
 
-        for (i, param) in params.iter().enumerate() {
+        for (i, param) in func.params().iter().enumerate() {
             let ptr = self
                 .builder
                 .build_alloca(self.llvm_type_of(param.ty()), param.name())?;
@@ -490,41 +477,14 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
             locals.insert(param.id(), ptr);
         }
 
-        let ret_value = self.compile_block(body, &mut locals)?;
-        self.builder.build_return(if let Type::Unit = ret_type {
-            None
-        } else {
-            Some(&ret_value)
-        })?;
+        let ret_value = self.compile_block(func.body(), &mut locals)?;
+        self.builder.build_return(
+            matches!(func.body().tail_type(), Type::Unit)
+                .not()
+                .then_some(&ret_value),
+        )?;
         if !func_value.verify(true) {
             return Err(Error::FuncVerify);
-        }
-        Ok(())
-    }
-
-    fn compile_extern_item(
-        &mut self,
-        id: FuncId,
-        param_types: &[Type],
-        ret_type: &Type,
-    ) -> Result<()> {
-        self.define_func(id, param_types.to_vec(), ret_type)?;
-        Ok(())
-    }
-
-    fn compile_item(&mut self, item: &CheckedItem) -> Result<()> {
-        use CheckedItem::*;
-        match item {
-            Func(id, params, ret_type, body) => self.compile_func_item(*id, params, ret_type, body),
-            Extern(id, param_types, ret_type) => {
-                self.compile_extern_item(*id, param_types, ret_type)
-            }
-        }
-    }
-
-    fn compile_items(&mut self, items: &[CheckedItem]) -> Result<()> {
-        for item in items {
-            self.compile_item(item)?;
         }
         Ok(())
     }
@@ -534,10 +494,13 @@ pub fn compile<'src, 'ctx>(
     context: &'ctx Context,
     symbols: &Symbols<'src>,
     src_path: &Path,
-    items: &[CheckedItem],
+    funcs: &[CheckedFunc],
 ) -> Result<Module<'ctx>> {
-    let mut compiler = Compiler::new(context, symbols, src_path);
-    compiler.compile_items(items)?;
+    let mut compiler = Compiler::new(context, src_path);
+    compiler.declare_funcs(symbols)?;
+    for func in funcs {
+        compiler.compile_func(func)?;
+    }
     compiler
         .module
         .verify()

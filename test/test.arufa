@@ -98,12 +98,21 @@ fn fact(n: u32) -> u32 {
     if n == 1 { 1 as u32 } else { n * fact(n - 1 as u32) }
 }
 
+fn is_even(n: u32) -> bool {
+    if n == 0 as u32 { true } else { is_odd(n - 1 as u32) }
+}
+
+fn is_odd(n: u32) -> bool {
+    if n == 1 as u32 { true } else { is_even(n - 1 as u32) }
+}
+
 extern fn add_c(i32, i32) -> i32;
 extern fn fact_c(u32) -> u32;
 
 fn fn_test() {
     assert_i32("simple function", add(4, 5), 9);
     assert_i32("recursive function", fact(5 as u32) as i32, 120);
+    assert("mutual recursive function", is_even(8 as u32));
 
     assert_i32("simple C function from Arufa", add_c(4, 5), 9);
     assert_i32("recursive C function from Arufa", fact_c(5 as u32) as i32, 120);

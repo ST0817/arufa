@@ -8,12 +8,12 @@ use crate::{
         TypeKind,
     },
     checked_ast::{
-        CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedItem, CheckedLValueExpr,
+        CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedFunc, CheckedLValueExpr,
         CheckedLValueExprKind, CheckedParam, CheckedStmt,
     },
     error::{CheckError, CheckErrorKind::*},
     scope::{Scope, Var},
-    symbols::{FuncDef, FuncId, FuncSig, Symbols},
+    symbols::{FuncSig, Symbols},
 };
 
 fn find_var<'src, 'scope>(
@@ -52,15 +52,13 @@ fn check_int_type(ty: &Type, span: &SimpleSpan) -> Result<()> {
 }
 
 #[derive(Debug)]
-struct Checker<'src> {
-    symbols: Symbols<'src>,
+struct Checker<'src, 'symbols> {
+    symbols: &'symbols Symbols<'src>,
 }
 
-impl<'src> Checker<'src> {
-    fn new() -> Self {
-        Self {
-            symbols: Symbols::new(),
-        }
+impl<'src, 'symbols> Checker<'src, 'symbols> {
+    fn new(symbols: &'symbols Symbols<'src>) -> Self {
+        Self { symbols }
     }
 
     fn check_var_lvalue(
@@ -76,7 +74,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_deref_lvalue(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -92,7 +90,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_lvalue(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -117,7 +115,7 @@ impl<'src> Checker<'src> {
         Ok(CheckedExpr::new(CheckedExprKind::Bool(value), Type::Bool))
     }
 
-    fn check_str_expr(&mut self, value: String) -> Result<CheckedExpr> {
+    fn check_str_expr(&self, value: String) -> Result<CheckedExpr> {
         Ok(CheckedExpr::new(CheckedExprKind::Str(value), Type::Str))
     }
 
@@ -139,7 +137,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_arith_bin_expr(
-        &mut self,
+        &self,
         lhs: &Expr<'src>,
         lhs_span: &SimpleSpan,
         op: ArithBinOp,
@@ -159,7 +157,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_shift_bin_expr(
-        &mut self,
+        &self,
         lhs: &Expr<'src>,
         lhs_span: &SimpleSpan,
         op: ShiftBinOp,
@@ -179,7 +177,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_cmp_bin_expr(
-        &mut self,
+        &self,
         lhs: &Expr<'src>,
         op: CmpBinOp,
         rhs: &Expr<'src>,
@@ -201,7 +199,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_logic_bin_expr(
-        &mut self,
+        &self,
         lhs: &Expr<'src>,
         lhs_span: &SimpleSpan,
         op: LogicBinOp,
@@ -220,7 +218,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_neg_expr(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -234,7 +232,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_not_expr(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -248,7 +246,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_ref_expr(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -262,7 +260,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_deref_expr(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         expr_span: &SimpleSpan,
         scope: &mut Scope<'src>,
@@ -276,7 +274,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_if_expr(
-        &mut self,
+        &self,
         cond: &Expr<'src>,
         cond_span: &SimpleSpan,
         then: &Spanned<Block<'src>>,
@@ -308,7 +306,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_call_expr(
-        &mut self,
+        &self,
         name: &Spanned<&'src str>,
         args: &Spanned<Vec<Spanned<Expr<'src>>>>,
         scope: &mut Scope<'src>,
@@ -316,7 +314,7 @@ impl<'src> Checker<'src> {
         let Some(func_id) = self.symbols.get(name) else {
             return Err(CheckError::new(UndefinedFunction, name.span));
         };
-        let func_sig = self.symbols[func_id].sig().clone();
+        let func_sig = self.symbols[func_id].sig();
         if args.len() != func_sig.params().len() {
             return Err(CheckError::new(ArgNumMismatch, args.span));
         }
@@ -334,7 +332,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_as_expr(
-        &mut self,
+        &self,
         expr: &Expr<'src>,
         ty: &Type,
         span: &SimpleSpan,
@@ -363,7 +361,7 @@ impl<'src> Checker<'src> {
         ))
     }
 
-    fn check_expr(&mut self, expr: &Expr<'src>, scope: &mut Scope<'src>) -> Result<CheckedExpr> {
+    fn check_expr(&self, expr: &Expr<'src>, scope: &mut Scope<'src>) -> Result<CheckedExpr> {
         use Expr::*;
         match expr {
             Int(value) => self.check_int_expr(*value),
@@ -403,7 +401,7 @@ impl<'src> Checker<'src> {
     }
 
     fn check_assign_stmt(
-        &mut self,
+        &self,
         target: &Spanned<Expr<'src>>,
         expr: &Spanned<Expr<'src>>,
         scope: &mut Scope<'src>,
@@ -414,16 +412,12 @@ impl<'src> Checker<'src> {
         Ok(CheckedStmt::Assign(addr_value, checked_expr))
     }
 
-    fn check_expr_stmt(
-        &mut self,
-        expr: &Expr<'src>,
-        scope: &mut Scope<'src>,
-    ) -> Result<CheckedStmt> {
+    fn check_expr_stmt(&self, expr: &Expr<'src>, scope: &mut Scope<'src>) -> Result<CheckedStmt> {
         let checked_expr = self.check_expr(expr, scope)?;
         Ok(CheckedStmt::Expr(checked_expr))
     }
 
-    fn check_stmt(&mut self, stmt: &Stmt<'src>, scope: &mut Scope<'src>) -> Result<CheckedStmt> {
+    fn check_stmt(&self, stmt: &Stmt<'src>, scope: &mut Scope<'src>) -> Result<CheckedStmt> {
         use Stmt::*;
         match stmt {
             Var(name, ty) => self.check_var_stmt(name, ty, scope),
@@ -432,11 +426,7 @@ impl<'src> Checker<'src> {
         }
     }
 
-    fn check_block(
-        &mut self,
-        block: &Block<'src>,
-        scope: &mut Scope<'src>,
-    ) -> Result<CheckedBlock> {
+    fn check_block(&self, block: &Block<'src>, scope: &mut Scope<'src>) -> Result<CheckedBlock> {
         let checked_stmts = block
             .stmts()
             .iter()
@@ -449,36 +439,15 @@ impl<'src> Checker<'src> {
         Ok(CheckedBlock::new(checked_stmts, tail))
     }
 
-    fn define_func(
-        &mut self,
-        name: &Spanned<&'src str>,
-        params: Vec<Type>,
-        ret: &Type,
-    ) -> Result<FuncId> {
-        let None = self.symbols.get(name) else {
-            return Err(CheckError::new(AlreadyDefined, name.span));
-        };
-        let id = self
-            .symbols
-            .insert(name, FuncDef::new(name, FuncSig::new(params, ret.clone())));
-        Ok(id)
-    }
-
     fn check_func_item(
-        &mut self,
+        &self,
         name: &Spanned<&'src str>,
         params: &[Param<'src>],
         ret_type: &Type,
-        body: &Block<'src>,
-    ) -> Result<CheckedItem<'src>> {
-        let param_types = params
-            .iter()
-            .map(|param| param.ty().clone())
-            .collect::<Vec<_>>();
-        let id = self.define_func(name, param_types, ret_type)?;
-
+        body: &Spanned<Block<'src>>,
+    ) -> Result<CheckedFunc<'src>> {
+        let id = self.symbols[name.inner];
         let mut scope = Scope::new();
-
         let checked_params = params
             .iter()
             .map(|param| {
@@ -486,57 +455,29 @@ impl<'src> Checker<'src> {
                 Ok(CheckedParam::new(param.name(), id, param.ty().clone()))
             })
             .collect::<Result<_>>()?;
-
         let checked_body = self.check_block(body, &mut scope)?;
-        Ok(CheckedItem::Func(
-            id,
-            checked_params,
-            ret_type.clone(),
-            checked_body,
-        ))
+        check_type_match(ret_type, checked_body.tail_type(), &body.span)?;
+        Ok(CheckedFunc::new(id, checked_params, checked_body))
     }
 
-    fn check_extern_item(
-        &mut self,
-        name: &Spanned<&'src str>,
-        param_types: &[Type],
-        ret_type: &Type,
-    ) -> Result<CheckedItem<'src>> {
-        let id = self.define_func(name, param_types.to_vec(), ret_type)?;
-        Ok(CheckedItem::Extern(
-            id,
-            param_types.to_vec(),
-            ret_type.clone(),
-        ))
-    }
-
-    fn check_item(&mut self, item: &Item<'src>) -> Result<CheckedItem<'src>> {
-        use Item::*;
-        match item {
-            Func(name, params, ret_type, body) => {
-                self.check_func_item(name, params, ret_type, body)
-            }
-            Extern(name, param_types, ret_type) => {
-                self.check_extern_item(name, param_types, ret_type)
+    fn check_items(&self, items: &[Item<'src>]) -> Result<Vec<CheckedFunc<'src>>> {
+        let mut checked_funcs = Vec::new();
+        for item in items {
+            if let Item::Func(name, params, ret_type, body) = item {
+                checked_funcs.push(self.check_func_item(name, params, ret_type, body)?);
             }
         }
-    }
-
-    fn check_items(&mut self, items: &[Item<'src>]) -> Result<Vec<CheckedItem<'src>>> {
-        let checked_items = items
-            .iter()
-            .map(|item| self.check_item(item))
-            .collect::<Result<_>>()?;
         if !matches!(self.symbols.get("main"), Some(id) if *self.symbols[id].sig() == FuncSig::new(Vec::new(), Type::I32))
         {
             return Err(CheckError::new(NoMain, SimpleSpan::default()));
         }
-        Ok(checked_items)
+        Ok(checked_funcs)
     }
 }
 
-pub fn check<'src>(items: &[Item<'src>]) -> Result<(Vec<CheckedItem<'src>>, Symbols<'src>)> {
-    let mut checker = Checker::new();
-    let checked_items = checker.check_items(items)?;
-    Ok((checked_items, checker.symbols))
+pub fn check<'src>(
+    items: &[Item<'src>],
+    symbols: &Symbols<'src>,
+) -> Result<Vec<CheckedFunc<'src>>> {
+    Checker::new(symbols).check_items(items)
 }

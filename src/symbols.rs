@@ -1,3 +1,4 @@
+use core::slice;
 use std::{collections::HashMap, ops::Index};
 
 use crate::ast::Type;
@@ -26,18 +27,23 @@ impl FuncSig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FuncDef<'src> {
+pub struct FuncDecl<'src> {
     name: &'src str,
+    id: FuncId,
     sig: FuncSig,
 }
 
-impl<'src> FuncDef<'src> {
-    pub fn new(name: &'src str, sig: FuncSig) -> Self {
-        Self { name, sig }
+impl<'src> FuncDecl<'src> {
+    pub fn new(name: &'src str, id: FuncId, sig: FuncSig) -> Self {
+        Self { name, id, sig }
     }
 
     pub fn name(&self) -> &'src str {
         self.name
+    }
+
+    pub fn id(&self) -> FuncId {
+        self.id
     }
 
     pub fn sig(&self) -> &FuncSig {
@@ -47,7 +53,7 @@ impl<'src> FuncDef<'src> {
 
 #[derive(Debug)]
 pub struct Symbols<'src> {
-    funcs: Vec<FuncDef<'src>>,
+    funcs: Vec<FuncDecl<'src>>,
     func_ids: HashMap<&'src str, FuncId>,
 }
 
@@ -63,17 +69,33 @@ impl<'src> Symbols<'src> {
         self.func_ids.get(name).copied()
     }
 
-    pub fn insert(&mut self, name: &'src str, func_def: FuncDef<'src>) -> FuncId {
+    pub fn insert(&mut self, name: &'src str, sig: FuncSig) -> FuncId {
         let id = FuncId(self.funcs.len());
-        self.funcs.push(func_def);
+        let decl = FuncDecl::new(name, id, sig);
+        self.funcs.push(decl);
         self.func_ids.insert(name, id);
         id
     }
 }
 
 impl<'src> Index<FuncId> for Symbols<'src> {
-    type Output = FuncDef<'src>;
+    type Output = FuncDecl<'src>;
     fn index(&self, index: FuncId) -> &Self::Output {
         &self.funcs[index.0]
+    }
+}
+
+impl<'src> Index<&str> for Symbols<'src> {
+    type Output = FuncId;
+    fn index(&self, index: &str) -> &Self::Output {
+        &self.func_ids[index]
+    }
+}
+
+impl<'src, 'a> IntoIterator for &'a Symbols<'src> {
+    type Item = &'a FuncDecl<'src>;
+    type IntoIter = slice::Iter<'a, FuncDecl<'src>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.funcs.iter()
     }
 }

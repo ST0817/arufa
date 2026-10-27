@@ -271,7 +271,7 @@ fn func_item<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         .ignore_then(name().spanned())
         .then(parens_comma(param()))
         .then(just(Arrow).ignore_then(ty()).or(empty().to(Type::Unit)))
-        .then(block(expr))
+        .then(block(expr).spanned())
         .map(|(((name, params), ret_type), body)| Item::Func(name, params, ret_type, body))
 }
 

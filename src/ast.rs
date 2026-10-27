@@ -181,6 +181,11 @@ impl<'src> Param<'src> {
 
 #[derive(Debug)]
 pub enum Item<'src> {
-    Func(Spanned<&'src str>, Vec<Param<'src>>, Type, Block<'src>),
+    Func(
+        Spanned<&'src str>,
+        Vec<Param<'src>>,
+        Type,
+        Spanned<Block<'src>>,
+    ),
     Extern(Spanned<&'src str>, Vec<Type>, Type),
 }

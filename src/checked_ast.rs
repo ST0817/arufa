@@ -138,7 +138,26 @@ impl<'src> CheckedParam<'src> {
 }
 
 #[derive(Debug)]
-pub enum CheckedItem<'src> {
-    Func(FuncId, Vec<CheckedParam<'src>>, Type, CheckedBlock),
-    Extern(FuncId, Vec<Type>, Type),
+pub struct CheckedFunc<'src> {
+    id: FuncId,
+    params: Vec<CheckedParam<'src>>,
+    body: CheckedBlock,
+}
+
+impl<'src> CheckedFunc<'src> {
+    pub fn new(id: FuncId, params: Vec<CheckedParam<'src>>, body: CheckedBlock) -> Self {
+        Self { id, params, body }
+    }
+
+    pub fn id(&self) -> FuncId {
+        self.id
+    }
+
+    pub fn params(&self) -> &[CheckedParam<'src>] {
+        &self.params
+    }
+
+    pub fn body(&self) -> &CheckedBlock {
+        &self.body
+    }
 }

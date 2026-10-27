@@ -119,7 +119,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
     }
 
     fn compile_str_expr(&self, value: &str) -> Result<BasicValueEnum<'ctx>> {
-        let value = self.builder.build_global_string_ptr(value, "str")?;
+        let value = self.builder.build_global_string_ptr(value, "")?;
         Ok(value.as_basic_value_enum())
     }
 
@@ -138,18 +138,18 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         let lhs_value = self.compile_expr(lhs, locals)?.into_int_value();
         let rhs_value = self.compile_expr(rhs, locals)?.into_int_value();
         let value = match op {
-            Add => self.builder.build_int_add(lhs_value, rhs_value, "add")?,
-            Sub => self.builder.build_int_sub(lhs_value, rhs_value, "sub")?,
-            Mul => self.builder.build_int_mul(lhs_value, rhs_value, "mul")?,
+            Add => self.builder.build_int_add(lhs_value, rhs_value, "")?,
+            Sub => self.builder.build_int_sub(lhs_value, rhs_value, "")?,
+            Mul => self.builder.build_int_mul(lhs_value, rhs_value, "")?,
             Div => self
                 .builder
-                .build_int_signed_div(lhs_value, rhs_value, "sdiv")?,
+                .build_int_signed_div(lhs_value, rhs_value, "")?,
             Mod => self
                 .builder
-                .build_int_signed_rem(lhs_value, rhs_value, "srem")?,
-            And => self.builder.build_and(lhs_value, rhs_value, "and")?,
-            Or => self.builder.build_or(lhs_value, rhs_value, "or")?,
-            Xor => self.builder.build_xor(lhs_value, rhs_value, "xor")?,
+                .build_int_signed_rem(lhs_value, rhs_value, "")?,
+            And => self.builder.build_and(lhs_value, rhs_value, "")?,
+            Or => self.builder.build_or(lhs_value, rhs_value, "")?,
+            Xor => self.builder.build_xor(lhs_value, rhs_value, "")?,
         };
         Ok(value.as_basic_value_enum())
     }
@@ -165,12 +165,10 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         let lhs_value = self.compile_expr(lhs, locals)?.into_int_value();
         let rhs_value = self.compile_expr(rhs, locals)?.into_int_value();
         let value = match op {
-            LShift => self
-                .builder
-                .build_left_shift(lhs_value, rhs_value, "left_shift")?,
+            LShift => self.builder.build_left_shift(lhs_value, rhs_value, "")?,
             RShift => self
                 .builder
-                .build_right_shift(lhs_value, rhs_value, true, "right_shift")?,
+                .build_right_shift(lhs_value, rhs_value, true, "")?,
         };
         Ok(value.as_basic_value_enum())
     }
@@ -212,8 +210,8 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         let lhs_value = self.compile_expr(lhs, locals)?.into_int_value();
         let rhs_value = self.compile_expr(rhs, locals)?.into_int_value();
         let value = match op {
-            And => self.builder.build_and(lhs_value, rhs_value, "logic_and")?,
-            Or => self.builder.build_or(lhs_value, rhs_value, "logic_or")?,
+            And => self.builder.build_and(lhs_value, rhs_value, "")?,
+            Or => self.builder.build_or(lhs_value, rhs_value, "")?,
         };
         Ok(value.as_basic_value_enum())
     }
@@ -224,7 +222,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         locals: &mut Locals<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>> {
         let expr_value = self.compile_expr(expr, locals)?.into_int_value();
-        let value = self.builder.build_int_neg(expr_value, "neg")?;
+        let value = self.builder.build_int_neg(expr_value, "")?;
         Ok(value.as_basic_value_enum())
     }
 
@@ -234,7 +232,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         locals: &mut Locals<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>> {
         let expr_value = self.compile_expr(expr, locals)?.into_int_value();
-        let value = self.builder.build_not(expr_value, "not")?;
+        let value = self.builder.build_not(expr_value, "")?;
         Ok(value.as_basic_value_enum())
     }
 
@@ -255,7 +253,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         let ptr = self.compile_lvalue(expr, locals)?;
         let value = self
             .builder
-            .build_load(self.llvm_type_of(expr.ty()), ptr, "deref")?;
+            .build_load(self.llvm_type_of(expr.ty()), ptr, "")?;
         Ok(value.as_basic_value_enum())
     }
 
@@ -289,7 +287,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
             self.builder.position_at_end(merge_block);
             let phi = self
                 .builder
-                .build_phi(self.llvm_type_of(then.tail_type()), "if")?;
+                .build_phi(self.llvm_type_of(then.tail_type()), "")?;
             phi.add_incoming(&[(&then_value, then_end), (&else_value, else_end)]);
             Ok(phi.as_basic_value())
         } else {
@@ -322,7 +320,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
             .collect::<Result<Vec<_>>>()?;
         let call_value = self
             .builder
-            .build_call(self.func_values[func_id], &arg_values, "call")?;
+            .build_call(self.func_values[func_id], &arg_values, "")?;
         Ok(call_value
             .try_as_basic_value()
             .basic()
@@ -345,7 +343,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
                     expr_value.into_int_value(),
                     self.llvm_type_of(ty).into_int_type(),
                     is_signed,
-                    "cast",
+                    "",
                 )?
                 .as_basic_value_enum(),
             PtrToInt => self
@@ -353,7 +351,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
                 .build_ptr_to_int(
                     expr_value.into_pointer_value(),
                     self.llvm_type_of(ty).into_int_type(),
-                    "cast",
+                    "",
                 )?
                 .as_basic_value_enum(),
             IntToPtr => self
@@ -361,7 +359,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
                 .build_int_to_ptr(
                     expr_value.into_int_value(),
                     self.llvm_type_of(ty).into_pointer_type(),
-                    "cast",
+                    "",
                 )?
                 .as_basic_value_enum(),
             PtrToPtr => expr_value,
@@ -396,7 +394,7 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
     }
 
     fn compile_var_stmt(&self, id: VarId, ty: &Type, locals: &mut Locals<'ctx>) -> Result<()> {
-        let ptr = self.builder.build_alloca(self.llvm_type_of(ty), "var")?;
+        let ptr = self.builder.build_alloca(self.llvm_type_of(ty), "")?;
         locals.insert(id, ptr);
         Ok(())
     }
@@ -498,6 +496,9 @@ impl<'src, 'ctx, 'symbols> Compiler<'src, 'ctx, 'symbols> {
         } else {
             Some(&ret_value)
         })?;
+        if !func_value.verify(true) {
+            return Err(Error::FuncVerify);
+        }
         Ok(())
     }
 
@@ -540,6 +541,6 @@ pub fn compile<'src, 'ctx>(
     compiler
         .module
         .verify()
-        .map_err(|error| Error::Verify(error.to_string()))?;
+        .map_err(|error| Error::ModuleVerify(error.to_string()))?;
     Ok(compiler.module)
 }

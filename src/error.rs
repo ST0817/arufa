@@ -78,8 +78,10 @@ pub enum Error {
     Check(CheckError),
     #[error("IR builder error: {0}")]
     Builder(#[from] BuilderError),
-    #[error("IR verification error: {0}")]
-    Verify(String),
+    #[error("IR function verification error")]
+    FuncVerify,
+    #[error("IR module verification error: {0}")]
+    ModuleVerify(String),
     #[error("target `{triple}` is not available: {message}")]
     Target { triple: String, message: String },
 }
@@ -115,6 +117,6 @@ impl<'tokens, 'src> From<Vec<Rich<'tokens, Token<'src>>>> for Error {
 impl Error {
     pub fn is_internal(&self) -> bool {
         use Error::*;
-        matches!(self, Builder(_) | Verify(_))
+        matches!(self, Builder(_) | ModuleVerify(_))
     }
 }

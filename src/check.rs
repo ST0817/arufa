@@ -445,14 +445,14 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         params: &[Param<'src>],
         ret_type: &Type,
         body: &Spanned<Block<'src>>,
-    ) -> Result<CheckedFunc<'src>> {
+    ) -> Result<CheckedFunc> {
         let id = self.symbols[name.inner];
         let mut scope = Scope::new();
         let checked_params = params
             .iter()
             .map(|param| {
                 let id = scope.push(param.name(), param.ty().clone());
-                Ok(CheckedParam::new(param.name(), id, param.ty().clone()))
+                Ok(CheckedParam::new(id, param.ty().clone()))
             })
             .collect::<Result<_>>()?;
         let checked_body = self.check_block(body, &mut scope)?;
@@ -460,7 +460,7 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         Ok(CheckedFunc::new(id, checked_params, checked_body))
     }
 
-    fn check_items(&self, items: &[Item<'src>]) -> Result<Vec<CheckedFunc<'src>>> {
+    fn check_items(&self, items: &[Item<'src>]) -> Result<Vec<CheckedFunc>> {
         let mut checked_funcs = Vec::new();
         for item in items {
             if let Item::Func(name, params, ret_type, body) = item {
@@ -475,9 +475,6 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
     }
 }
 
-pub fn check<'src>(
-    items: &[Item<'src>],
-    symbols: &Symbols<'src>,
-) -> Result<Vec<CheckedFunc<'src>>> {
+pub fn check<'src>(items: &[Item<'src>], symbols: &Symbols<'src>) -> Result<Vec<CheckedFunc>> {
     Checker::new(symbols).check_items(items)
 }

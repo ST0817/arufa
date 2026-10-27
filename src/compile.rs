@@ -471,7 +471,7 @@ impl<'ctx> Compiler<'ctx> {
         for (i, param) in func.params().iter().enumerate() {
             let ptr = self
                 .builder
-                .build_alloca(self.llvm_type_of(param.ty()), param.name())?;
+                .build_alloca(self.llvm_type_of(param.ty()), "")?;
             let value = func_value.get_nth_param(i as u32).unwrap();
             self.builder.build_store(ptr, value)?;
             locals.insert(param.id(), ptr);

@@ -113,19 +113,14 @@ impl CheckedBlock {
 }
 
 #[derive(Debug)]
-pub struct CheckedParam<'src> {
-    name: &'src str,
+pub struct CheckedParam {
     id: VarId,
     ty: Type,
 }
 
-impl<'src> CheckedParam<'src> {
-    pub fn new(name: &'src str, id: VarId, ty: Type) -> Self {
-        Self { name, id, ty }
-    }
-
-    pub fn name(&self) -> &'src str {
-        self.name
+impl CheckedParam {
+    pub fn new(id: VarId, ty: Type) -> Self {
+        Self { id, ty }
     }
 
     pub fn id(&self) -> VarId {
@@ -138,14 +133,14 @@ impl<'src> CheckedParam<'src> {
 }
 
 #[derive(Debug)]
-pub struct CheckedFunc<'src> {
+pub struct CheckedFunc {
     id: FuncId,
-    params: Vec<CheckedParam<'src>>,
+    params: Vec<CheckedParam>,
     body: CheckedBlock,
 }
 
-impl<'src> CheckedFunc<'src> {
-    pub fn new(id: FuncId, params: Vec<CheckedParam<'src>>, body: CheckedBlock) -> Self {
+impl CheckedFunc {
+    pub fn new(id: FuncId, params: Vec<CheckedParam>, body: CheckedBlock) -> Self {
         Self { id, params, body }
     }
 
@@ -153,7 +148,7 @@ impl<'src> CheckedFunc<'src> {
         self.id
     }
 
-    pub fn params(&self) -> &[CheckedParam<'src>] {
+    pub fn params(&self) -> &[CheckedParam] {
         &self.params
     }
 

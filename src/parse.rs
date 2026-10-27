@@ -5,7 +5,7 @@ use chumsky::{
     input::{Input, ValueInput},
     pratt::{Associativity, Operator as ChumskyOperator, infix, left, postfix, prefix},
     primitive::{choice, empty, just},
-    recursive::{Recursive, recursive},
+    recursive::recursive,
     select,
     span::{SimpleSpan, SpanWrap, Spanned},
     text::TextExpected,
@@ -70,18 +70,14 @@ fn atom_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
-    let mut ty = Recursive::declare();
-    ty.define({
-        let atom = atom_type();
-        choice((
-            atom.clone()
-                .map(Box::new)
-                .then_ignore(just(Token::Star))
-                .map(Type::Ptr),
-            atom,
-        ))
-    });
-    ty
+    let atom = atom_type();
+    choice((
+        atom.clone()
+            .map(Box::new)
+            .then_ignore(just(Token::Star))
+            .map(Type::Ptr),
+        atom,
+    ))
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -157,6 +153,17 @@ fn prefix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     )
 }
 
+fn as_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
+-> impl Operator<'tokens, 'src, I, Spanned<Expr<'src>>> {
+    postfix(
+        9,
+        just(Token::As).ignore_then(ty()),
+        |expr: Spanned<_>, ty, extra| {
+            Expr::As(Box::new(expr.inner), ty, extra.span()).with_span(extra.span())
+        },
+    )
+}
+
 fn infix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, Op: Clone + 'tokens>(
     assoc: Associativity,
     op_token: Token<'src>,
@@ -179,22 +186,13 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         Expr::{ArithBin, CmpBin, LogicBin, ShiftBin},
         Token::*,
     };
-    let as_op = |prec| {
-        postfix(
-            prec,
-            just(As).ignore_then(ty()),
-            |expr: Spanned<_>, ty, extra| {
-                Expr::As(Box::new(expr.inner), ty, extra.span()).with_span(extra.span())
-            },
-        )
-    };
     expr.spanned()
         .pratt((
             prefix_op(Minus, Expr::Neg),
             prefix_op(Not, Expr::Not),
             prefix_op(Amp, Expr::Ref),
             prefix_op(Star, Expr::Deref),
-            as_op(9),
+            as_op(),
             infix_op(left(8), Star, ArithBinOp::Mul, ArithBin),
             infix_op(left(8), Slash, ArithBinOp::Div, ArithBin),
             infix_op(left(8), Perc, ArithBinOp::Mod, ArithBin),
@@ -305,8 +303,7 @@ fn item<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
 
 fn parser<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Vec<Item<'src>>> {
-    let mut expr = Recursive::declare();
-    expr.define({
+    let expr = recursive(|expr| {
         let atom = choice((
             int_expr(),
             bool_expr(),

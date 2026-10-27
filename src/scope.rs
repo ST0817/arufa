@@ -1,27 +1,24 @@
-use std::rc::Rc;
-
-use inkwell::values::PointerValue;
+use std::ops::Index;
 
 use crate::ast::Type;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VarId(usize);
+
 #[derive(Debug)]
-pub struct Var<'src, 'ctx> {
+pub struct Var<'src> {
     name: &'src str,
-    ptr_value: PointerValue<'ctx>,
+    id: VarId,
     ty: Type,
 }
 
-impl<'src, 'ctx> Var<'src, 'ctx> {
-    pub fn new(name: &'src str, ptr_value: PointerValue<'ctx>, ty: Type) -> Self {
-        Self {
-            name,
-            ptr_value,
-            ty,
-        }
+impl<'src> Var<'src> {
+    fn new(name: &'src str, id: VarId, ty: Type) -> Self {
+        Self { name, id, ty }
     }
 
-    pub fn ptr_value(&self) -> PointerValue<'ctx> {
-        self.ptr_value
+    pub fn id(&self) -> VarId {
+        self.id
     }
 
     pub fn ty(&self) -> &Type {
@@ -30,20 +27,30 @@ impl<'src, 'ctx> Var<'src, 'ctx> {
 }
 
 #[derive(Debug)]
-pub struct Scope<'src, 'ctx> {
-    vars: Vec<Rc<Var<'src, 'ctx>>>,
+pub struct Scope<'src> {
+    vars: Vec<Var<'src>>,
 }
 
-impl<'src, 'ctx> Scope<'src, 'ctx> {
+impl<'src> Scope<'src> {
     pub fn new() -> Self {
         Self { vars: Vec::new() }
     }
 
-    pub fn push(&mut self, var: Var<'src, 'ctx>) {
-        self.vars.push(Rc::new(var));
+    pub fn push(&mut self, name: &'src str, ty: Type) -> VarId {
+        let id = VarId(self.vars.len());
+        let var = Var::new(name, id, ty);
+        self.vars.push(var);
+        id
     }
 
-    pub fn find(&self, name: &str) -> Option<Rc<Var<'src, 'ctx>>> {
-        self.vars.iter().rev().find(|var| var.name == name).cloned()
+    pub fn find(&self, name: &str) -> Option<&Var<'src>> {
+        self.vars.iter().rev().find(|var| var.name == name)
+    }
+}
+
+impl<'src> Index<VarId> for Scope<'src> {
+    type Output = Var<'src>;
+    fn index(&self, index: VarId) -> &Self::Output {
+        &self.vars[index.0]
     }
 }

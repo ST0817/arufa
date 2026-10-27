@@ -7,6 +7,7 @@ use chumsky::span::Spanned;
 use inkwell::context::Context;
 
 use crate::{
+    check::check,
     cli::Cli,
     compile::compile,
     emit::emit,
@@ -16,13 +17,15 @@ use crate::{
 };
 
 mod ast;
+mod check;
+mod checked_ast;
 mod cli;
 mod compile;
 mod emit;
 mod error;
-mod func_defs;
 mod parse;
 mod scope;
+mod symbols;
 mod token;
 mod tokenize;
 
@@ -31,7 +34,8 @@ fn run(cli: &Cli, src: &mut String, src_path: &Path) -> Result<(), Error> {
     let tokens = tokenize(src)?;
     let items = parse(&tokens, src)?;
     let context = Context::create();
-    let module = compile(&context, src_path, &items)?;
+    let (checked_items, symbols) = check(&items)?;
+    let module = compile(&context, &symbols, src_path, &checked_items)?;
     emit(cli, &module)?;
     Ok(())
 }

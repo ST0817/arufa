@@ -1,0 +1,542 @@
+use std::iter::zip;
+
+use chumsky::span::{SimpleSpan, Spanned};
+
+use crate::{
+    ast::{
+        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type,
+        TypeKind,
+    },
+    checked_ast::{
+        CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedItem, CheckedLValueExpr,
+        CheckedLValueExprKind, CheckedParam, CheckedStmt,
+    },
+    error::{CheckError, CheckErrorKind::*},
+    scope::{Scope, Var},
+    symbols::{FuncDef, FuncId, FuncSig, Symbols},
+};
+
+fn find_var<'src, 'scope>(
+    name: &Spanned<&str>,
+    scope: &'scope Scope<'src>,
+) -> Result<&'scope Var<'src>> {
+    scope
+        .find(name)
+        .ok_or_else(|| CheckError::new(UndefinedVariable, name.span))
+}
+
+type Result<T> = std::result::Result<T, CheckError>;
+
+fn check_type_match(expected: &Type, found: &Type, span: &SimpleSpan) -> Result<()> {
+    if expected != found {
+        return Err(CheckError::new(
+            TypeMismatch {
+                expected: expected.clone(),
+                found: found.clone(),
+            },
+            *span,
+        ));
+    }
+    Ok(())
+}
+
+fn check_bool_type(ty: &Type, span: &SimpleSpan) -> Result<()> {
+    check_type_match(&Type::Bool, ty, span)
+}
+
+fn check_int_type(ty: &Type, span: &SimpleSpan) -> Result<()> {
+    let TypeKind::Int = ty.kind() else {
+        return Err(CheckError::new(NotIntType(ty.clone()), *span));
+    };
+    Ok(())
+}
+
+#[derive(Debug)]
+struct Checker<'src> {
+    symbols: Symbols<'src>,
+}
+
+impl<'src> Checker<'src> {
+    fn new() -> Self {
+        Self {
+            symbols: Symbols::new(),
+        }
+    }
+
+    fn check_var_lvalue(
+        &self,
+        name: &Spanned<&str>,
+        scope: &Scope<'src>,
+    ) -> Result<CheckedLValueExpr> {
+        let var = find_var(name, scope)?;
+        Ok(CheckedLValueExpr::new(
+            CheckedLValueExprKind::Var(var.id()),
+            var.ty().clone(),
+        ))
+    }
+
+    fn check_deref_lvalue(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedLValueExpr> {
+        let texpr = self.check_expr(expr, scope)?;
+        let Type::Ptr(ty) = texpr.ty().clone() else {
+            return Err(CheckError::new(NotPtrType(texpr.ty().clone()), *expr_span));
+        };
+        Ok(CheckedLValueExpr::new(
+            CheckedLValueExprKind::Deref(texpr),
+            *ty,
+        ))
+    }
+
+    fn check_lvalue(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedLValueExpr> {
+        use Expr::*;
+        match expr {
+            Var(name) => self.check_var_lvalue(name, scope),
+            Deref(expr) => self.check_deref_lvalue(expr, &expr.span, scope),
+            _ => Err(CheckError::new(CannotGetAddress, *expr_span)),
+        }
+    }
+
+    fn check_int_expr(&self, value: u64) -> Result<CheckedExpr> {
+        Ok(CheckedExpr::new(CheckedExprKind::Int(value), Type::I32))
+    }
+
+    fn check_char_expr(&self, value: char) -> Result<CheckedExpr> {
+        Ok(CheckedExpr::new(CheckedExprKind::Char(value), Type::Char))
+    }
+
+    fn check_bool_expr(&self, value: bool) -> Result<CheckedExpr> {
+        Ok(CheckedExpr::new(CheckedExprKind::Bool(value), Type::Bool))
+    }
+
+    fn check_str_expr(&mut self, value: String) -> Result<CheckedExpr> {
+        Ok(CheckedExpr::new(CheckedExprKind::Str(value), Type::Str))
+    }
+
+    fn check_unit_expr(&self) -> Result<CheckedExpr> {
+        Ok(CheckedExpr::new(CheckedExprKind::Unit, Type::Unit))
+    }
+
+    fn check_var_expr(
+        &self,
+        name: &Spanned<&'src str>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lvalue_expr = self.check_var_lvalue(name, scope)?;
+        let ty = checked_lvalue_expr.ty().clone();
+        Ok(CheckedExpr::new(
+            CheckedExprKind::LValue(checked_lvalue_expr),
+            ty,
+        ))
+    }
+
+    fn check_arith_bin_expr(
+        &mut self,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
+        op: ArithBinOp,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lhs = self.check_expr(lhs, scope)?;
+        check_int_type(checked_lhs.ty(), lhs_span)?;
+        let checked_rhs = self.check_expr(rhs, scope)?;
+        check_type_match(checked_lhs.ty(), checked_rhs.ty(), rhs_span)?;
+        let ty = checked_lhs.ty().clone();
+        Ok(CheckedExpr::new(
+            CheckedExprKind::ArithBin(checked_lhs, op, checked_rhs),
+            ty,
+        ))
+    }
+
+    fn check_shift_bin_expr(
+        &mut self,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
+        op: ShiftBinOp,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lhs = self.check_expr(lhs, scope)?;
+        check_int_type(checked_lhs.ty(), lhs_span)?;
+        let checked_rhs = self.check_expr(rhs, scope)?;
+        check_int_type(checked_rhs.ty(), rhs_span)?;
+        let ty = checked_lhs.ty().clone();
+        Ok(CheckedExpr::new(
+            CheckedExprKind::ShiftBin(checked_lhs, op, checked_rhs),
+            ty,
+        ))
+    }
+
+    fn check_cmp_bin_expr(
+        &mut self,
+        lhs: &Expr<'src>,
+        op: CmpBinOp,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lhs = self.check_expr(lhs, scope)?;
+        let checked_rhs = self.check_expr(rhs, scope)?;
+        if !checked_lhs.ty().is_comparable_to(checked_rhs.ty()) {
+            return Err(CheckError::new(
+                CannotBeCompared(checked_lhs.ty().clone(), checked_rhs.ty().clone()),
+                *rhs_span,
+            ));
+        }
+        Ok(CheckedExpr::new(
+            CheckedExprKind::CmpBin(checked_lhs, op, checked_rhs),
+            Type::Bool,
+        ))
+    }
+
+    fn check_logic_bin_expr(
+        &mut self,
+        lhs: &Expr<'src>,
+        lhs_span: &SimpleSpan,
+        op: LogicBinOp,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lhs = self.check_expr(lhs, scope)?;
+        check_bool_type(checked_lhs.ty(), lhs_span)?;
+        let checked_rhs = self.check_expr(rhs, scope)?;
+        check_bool_type(checked_rhs.ty(), rhs_span)?;
+        Ok(CheckedExpr::new(
+            CheckedExprKind::LogicBin(checked_lhs, op, checked_rhs),
+            Type::Bool,
+        ))
+    }
+
+    fn check_neg_expr(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_expr = self.check_expr(expr, scope)?;
+        check_int_type(checked_expr.ty(), expr_span)?;
+        Ok(CheckedExpr::new(
+            CheckedExprKind::Neg(checked_expr),
+            Type::I32,
+        ))
+    }
+
+    fn check_not_expr(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_expr = self.check_expr(expr, scope)?;
+        check_bool_type(checked_expr.ty(), expr_span)?;
+        Ok(CheckedExpr::new(
+            CheckedExprKind::Not(checked_expr),
+            Type::Bool,
+        ))
+    }
+
+    fn check_ref_expr(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lvalue_expr = self.check_lvalue(expr, expr_span, scope)?;
+        let ty = Type::Ptr(Box::new(checked_lvalue_expr.ty().clone()));
+        Ok(CheckedExpr::new(
+            CheckedExprKind::Ref(checked_lvalue_expr),
+            ty,
+        ))
+    }
+
+    fn check_deref_expr(
+        &mut self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lvalue_expr = self.check_deref_lvalue(expr, expr_span, scope)?;
+        let ty = checked_lvalue_expr.ty().clone();
+        Ok(CheckedExpr::new(
+            CheckedExprKind::LValue(checked_lvalue_expr),
+            ty,
+        ))
+    }
+
+    fn check_if_expr(
+        &mut self,
+        cond: &Expr<'src>,
+        cond_span: &SimpleSpan,
+        then: &Spanned<Block<'src>>,
+        els: Option<&Spanned<Block<'src>>>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_cond = self.check_expr(cond, scope)?;
+        check_bool_type(checked_cond.ty(), cond_span)?;
+        let checked_then = self.check_block(then, scope)?;
+        if let Some(els) = els {
+            let checked_else = self.check_block(els, scope)?;
+            check_type_match(
+                checked_then.tail_type(),
+                checked_else.tail_type(),
+                &els.span,
+            )?;
+            let ty = checked_then.tail_type().clone();
+            Ok(CheckedExpr::new(
+                CheckedExprKind::If(checked_cond, checked_then, Some(checked_else)),
+                ty,
+            ))
+        } else {
+            check_type_match(&Type::Unit, checked_then.tail_type(), &then.span)?;
+            Ok(CheckedExpr::new(
+                CheckedExprKind::If(checked_cond, checked_then, None),
+                Type::Unit,
+            ))
+        }
+    }
+
+    fn check_call_expr(
+        &mut self,
+        name: &Spanned<&'src str>,
+        args: &Spanned<Vec<Spanned<Expr<'src>>>>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let Some(func_id) = self.symbols.get(name) else {
+            return Err(CheckError::new(UndefinedFunction, name.span));
+        };
+        let func_sig = self.symbols[func_id].sig().clone();
+        if args.len() != func_sig.params().len() {
+            return Err(CheckError::new(ArgNumMismatch, args.span));
+        }
+        let arg_values = zip(&args.inner, func_sig.params())
+            .map(|(arg, param_type)| {
+                let checked_arg = self.check_expr(arg, scope)?;
+                check_type_match(param_type, checked_arg.ty(), &arg.span)?;
+                Ok(checked_arg)
+            })
+            .collect::<Result<_>>()?;
+        Ok(CheckedExpr::new(
+            CheckedExprKind::Call(func_id, arg_values),
+            func_sig.ret().clone(),
+        ))
+    }
+
+    fn check_as_expr(
+        &mut self,
+        expr: &Expr<'src>,
+        ty: &Type,
+        span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        use {CastRule::*, TypeKind::*};
+        let value = self.check_expr(expr, scope)?;
+        let rule = match (value.ty().kind(), ty.kind()) {
+            (Unit, _) | (_, Unit) => {
+                return Err(CheckError::new(
+                    CannotBeCast {
+                        from: value.ty().clone(),
+                        to: ty.clone(),
+                    },
+                    *span,
+                ));
+            }
+            (Int | Bool | Char, Int | Bool | Char) => IntToInt(value.ty().is_signed()),
+            (Ptr, Int | Bool | Char) => PtrToInt,
+            (Int | Bool | Char, Ptr) => IntToPtr,
+            (Ptr, Ptr) => PtrToPtr,
+        };
+        Ok(CheckedExpr::new(
+            CheckedExprKind::As(value, ty.clone(), rule),
+            ty.clone(),
+        ))
+    }
+
+    fn check_expr(&mut self, expr: &Expr<'src>, scope: &mut Scope<'src>) -> Result<CheckedExpr> {
+        use Expr::*;
+        match expr {
+            Int(value) => self.check_int_expr(*value),
+            Bool(value) => self.check_bool_expr(*value),
+            Char(value) => self.check_char_expr(*value),
+            Str(value) => self.check_str_expr(value.clone()),
+            Unit => self.check_unit_expr(),
+            Var(name) => self.check_var_expr(name, scope),
+            ArithBin(lhs, op, rhs) => {
+                self.check_arith_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            ShiftBin(lhs, op, rhs) => {
+                self.check_shift_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            CmpBin(lhs, op, rhs) => self.check_cmp_bin_expr(lhs, *op, rhs, &rhs.span, scope),
+            LogicBin(lhs, op, rhs) => {
+                self.check_logic_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
+            }
+            Neg(expr) => self.check_neg_expr(expr, &expr.span, scope),
+            Not(expr) => self.check_not_expr(expr, &expr.span, scope),
+            Ref(expr) => self.check_ref_expr(expr, &expr.span, scope),
+            Deref(expr) => self.check_deref_expr(expr, &expr.span, scope),
+            If(cond, then, els) => self.check_if_expr(cond, &cond.span, then, els.as_ref(), scope),
+            Call(name, args) => self.check_call_expr(name, args, scope),
+            As(expr, ty, span) => self.check_as_expr(expr, ty, span, scope),
+        }
+    }
+
+    fn check_var_stmt(
+        &self,
+        name: &'src str,
+        ty: &Type,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedStmt> {
+        let id = scope.push(name, ty.clone());
+        Ok(CheckedStmt::Var(id, ty.clone()))
+    }
+
+    fn check_assign_stmt(
+        &mut self,
+        target: &Spanned<Expr<'src>>,
+        expr: &Spanned<Expr<'src>>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedStmt> {
+        let addr_value = self.check_lvalue(target, &target.span, scope)?;
+        let checked_expr = self.check_expr(expr, scope)?;
+        check_type_match(addr_value.ty(), checked_expr.ty(), &expr.span)?;
+        Ok(CheckedStmt::Assign(addr_value, checked_expr))
+    }
+
+    fn check_expr_stmt(
+        &mut self,
+        expr: &Expr<'src>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedStmt> {
+        let checked_expr = self.check_expr(expr, scope)?;
+        Ok(CheckedStmt::Expr(checked_expr))
+    }
+
+    fn check_stmt(&mut self, stmt: &Stmt<'src>, scope: &mut Scope<'src>) -> Result<CheckedStmt> {
+        use Stmt::*;
+        match stmt {
+            Var(name, ty) => self.check_var_stmt(name, ty, scope),
+            Assign(name, expr) => self.check_assign_stmt(name, expr, scope),
+            Expr(expr) => self.check_expr_stmt(expr, scope),
+        }
+    }
+
+    fn check_block(
+        &mut self,
+        block: &Block<'src>,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedBlock> {
+        let checked_stmts = block
+            .stmts()
+            .iter()
+            .map(|stmt| self.check_stmt(stmt, scope))
+            .collect::<Result<_>>()?;
+        let tail = block
+            .tail()
+            .map(|tail| self.check_expr(tail, scope))
+            .transpose()?;
+        Ok(CheckedBlock::new(checked_stmts, tail))
+    }
+
+    fn define_func(
+        &mut self,
+        name: &Spanned<&'src str>,
+        params: Vec<Type>,
+        ret: &Type,
+    ) -> Result<FuncId> {
+        let None = self.symbols.get(name) else {
+            return Err(CheckError::new(AlreadyDefined, name.span));
+        };
+        let id = self
+            .symbols
+            .insert(name, FuncDef::new(name, FuncSig::new(params, ret.clone())));
+        Ok(id)
+    }
+
+    fn check_func_item(
+        &mut self,
+        name: &Spanned<&'src str>,
+        params: &[Param<'src>],
+        ret_type: &Type,
+        body: &Block<'src>,
+    ) -> Result<CheckedItem<'src>> {
+        let param_types = params
+            .iter()
+            .map(|param| param.ty().clone())
+            .collect::<Vec<_>>();
+        let id = self.define_func(name, param_types, ret_type)?;
+
+        let mut scope = Scope::new();
+
+        let checked_params = params
+            .iter()
+            .map(|param| {
+                let id = scope.push(param.name(), param.ty().clone());
+                Ok(CheckedParam::new(param.name(), id, param.ty().clone()))
+            })
+            .collect::<Result<_>>()?;
+
+        let checked_body = self.check_block(body, &mut scope)?;
+        Ok(CheckedItem::Func(
+            id,
+            checked_params,
+            ret_type.clone(),
+            checked_body,
+        ))
+    }
+
+    fn check_extern_item(
+        &mut self,
+        name: &Spanned<&'src str>,
+        param_types: &[Type],
+        ret_type: &Type,
+    ) -> Result<CheckedItem<'src>> {
+        let id = self.define_func(name, param_types.to_vec(), ret_type)?;
+        Ok(CheckedItem::Extern(
+            id,
+            param_types.to_vec(),
+            ret_type.clone(),
+        ))
+    }
+
+    fn check_item(&mut self, item: &Item<'src>) -> Result<CheckedItem<'src>> {
+        use Item::*;
+        match item {
+            Func(name, params, ret_type, body) => {
+                self.check_func_item(name, params, ret_type, body)
+            }
+            Extern(name, param_types, ret_type) => {
+                self.check_extern_item(name, param_types, ret_type)
+            }
+        }
+    }
+
+    fn check_items(&mut self, items: &[Item<'src>]) -> Result<Vec<CheckedItem<'src>>> {
+        let checked_items = items
+            .iter()
+            .map(|item| self.check_item(item))
+            .collect::<Result<_>>()?;
+        if !matches!(self.symbols.get("main"), Some(id) if *self.symbols[id].sig() == FuncSig::new(Vec::new(), Type::I32))
+        {
+            return Err(CheckError::new(NoMain, SimpleSpan::default()));
+        }
+        Ok(checked_items)
+    }
+}
+
+pub fn check<'src>(items: &[Item<'src>]) -> Result<(Vec<CheckedItem<'src>>, Symbols<'src>)> {
+    let mut checker = Checker::new();
+    let checked_items = checker.check_items(items)?;
+    Ok((checked_items, checker.symbols))
+}

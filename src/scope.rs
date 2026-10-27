@@ -5,7 +5,7 @@ use crate::ast::Type;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Var<'src> {
     name: &'src str,
     id: VarId,
@@ -26,7 +26,7 @@ impl<'src> Var<'src> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Scope<'src> {
     vars: Vec<Var<'src>>,
 }

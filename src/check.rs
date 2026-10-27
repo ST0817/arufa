@@ -283,9 +283,9 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
     ) -> Result<CheckedExpr> {
         let checked_cond = self.check_expr(cond, scope)?;
         check_bool_type(checked_cond.ty(), cond_span)?;
-        let checked_then = self.check_block(then, scope)?;
+        let checked_then = self.check_block(then, &mut scope.clone())?;
         if let Some(els) = els {
-            let checked_else = self.check_block(els, scope)?;
+            let checked_else = self.check_block(els, &mut scope.clone())?;
             check_type_match(
                 checked_then.tail_type(),
                 checked_else.tail_type(),

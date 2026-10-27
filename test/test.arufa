@@ -86,8 +86,29 @@ fn var_test() {
 }
 
 fn if_test() {
-    assert_i32("if then", if true { 0 } else { 1 }, 0);
-    assert_i32("if else", if false { 0 } else { 1 }, 1);
+    var result: i32;
+    result = if true {
+        var x: i32;
+        var y: i32;
+        x = 0;
+        x
+    } else {
+        var x: i32;
+        x = 1;
+        x
+    };
+    assert_i32("if then", result, 0);
+    result = if false {
+        var x: i32;
+        x = 0;
+        x
+    } else {
+        var x: i32;
+        var y: i32;
+        x = 1;
+        x
+    };
+    assert_i32("if else", result, 1);
 }
 
 fn add(a: i32, b: i32) -> i32 {

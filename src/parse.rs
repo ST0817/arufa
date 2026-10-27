@@ -5,7 +5,7 @@ use chumsky::{
     input::{Input, ValueInput},
     pratt::{Associativity, Operator as ChumskyOperator, infix, left, postfix, prefix},
     primitive::{choice, empty, just},
-    recursive::Recursive,
+    recursive::{Recursive, recursive},
     select,
     span::{SimpleSpan, SpanWrap, Spanned},
     text::TextExpected,
@@ -111,15 +111,25 @@ fn unit_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 }
 
 fn if_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
-    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>> + 'tokens,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    use Token::*;
-    let else_clause = just(Else).ignore_then(block(expr.clone()).spanned());
-    just(If)
-        .ignore_then(expr.clone().map(Box::new).spanned())
-        .then(block(expr).spanned())
-        .then(else_clause.or_not())
-        .map(|((cond, then), els)| Expr::If(cond, then, els))
+    recursive(|if_expr| {
+        use Token::*;
+        let else_clause = just(Else).ignore_then(
+            choice((
+                if_expr
+                    .clone()
+                    .map(|if_exor| Block::new(Vec::new(), Some(Box::new(if_exor)))),
+                block(expr.clone()),
+            ))
+            .spanned(),
+        );
+        just(If)
+            .ignore_then(expr.clone().map(Box::new).spanned())
+            .then(block(expr).spanned())
+            .then(else_clause.or_not())
+            .map(|((cond, then), els)| Expr::If(cond, then, els))
+    })
 }
 
 fn call_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(

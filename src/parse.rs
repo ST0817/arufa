@@ -16,7 +16,7 @@ use crate::{
     error::Error,
     token::{
         Lit,
-        Token::{self, LParen, RParen},
+        Token::{self},
     },
 };
 
@@ -35,7 +35,15 @@ trait Operator<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T> =
 fn parens<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
     parser: impl Parser<'tokens, 'src, I, T>,
 ) -> impl Parser<'tokens, 'src, I, T> {
+    use Token::*;
     parser.delimited_by(just(LParen), just(RParen))
+}
+
+fn brackets<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
+    parser: impl Parser<'tokens, 'src, I, T>,
+) -> impl Parser<'tokens, 'src, I, T> {
+    use Token::*;
+    parser.delimited_by(just(LBracket), just(RBracket))
 }
 
 fn parens_comma<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
@@ -43,6 +51,11 @@ fn parens_comma<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, T>(
 ) -> impl Parser<'tokens, 'src, I, Vec<T>> {
     use Token::*;
     parens(parser.separated_by(just(Comma)).collect())
+}
+
+fn int<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, u64>
+{
+    select! { Token::Lit(Lit::Int(value)) => value }
 }
 
 fn name<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -68,21 +81,31 @@ fn atom_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     ))
 }
 
+fn ptr_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    ty: impl Parser<'tokens, 'src, I, Type>,
+) -> impl Parser<'tokens, 'src, I, Type> {
+    ty.map(Box::new)
+        .then_ignore(just(Token::Star))
+        .map(Type::Ptr)
+}
+
+fn array_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    ty: impl Parser<'tokens, 'src, I, Type>,
+) -> impl Parser<'tokens, 'src, I, Type> {
+    ty.map(Box::new)
+        .then(brackets(int()))
+        .map(|(ty, len)| Type::Array(ty, len))
+}
+
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
     let atom = atom_type();
-    choice((
-        atom.clone()
-            .map(Box::new)
-            .then_ignore(just(Token::Star))
-            .map(Type::Ptr),
-        atom,
-    ))
+    choice((ptr_type(atom.clone()), array_type(atom.clone()), atom))
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
 -> impl Parser<'tokens, 'src, I, Expr<'src>> {
-    select! { Token::Lit(Lit::Int(value)) => Expr::Int(value) }.labelled(TextExpected::<()>::Int)
+    int().map(Expr::Int).labelled(TextExpected::<()>::Int)
 }
 
 fn bool_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
@@ -164,6 +187,14 @@ fn as_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
     )
 }
 
+fn index_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
+) -> impl Operator<'tokens, 'src, I, Spanned<Expr<'src>>> {
+    postfix(10, brackets(expr.spanned()), |array, index, extra| {
+        Expr::Index(box_spanned(array), box_spanned(index)).with_span(extra.span())
+    })
+}
+
 fn infix_op<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>, Op: Clone + 'tokens>(
     assoc: Associativity,
     op_token: Token<'src>,
@@ -186,8 +217,10 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         Expr::{ArithBin, CmpBin, LogicBin, ShiftBin},
         Token::*,
     };
-    expr.spanned()
+    expr.clone()
+        .spanned()
         .pratt((
+            index_op(expr),
             prefix_op(Minus, Expr::Neg),
             prefix_op(Not, Expr::Not),
             prefix_op(Amp, Expr::Ref),

@@ -9,6 +9,7 @@ pub enum TypeKind {
     Char,
     Ptr,
     Unit,
+    Array,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,9 +27,26 @@ pub enum Type {
     Str,
     Unit,
     Ptr(Box<Self>),
+    Array(Box<Self>, u64),
 }
 
 impl Type {
+    pub fn size(&self) -> usize {
+        use Type::*;
+        match self {
+            Unit => 0,
+            U8 | I8 | Bool | Char => 1,
+            U16 | I16 => 2,
+            U32 | I32 => 4,
+            U64 | I64 | Ptr(_) | Str => 8,
+            Array(ty, len) => ty.size() * *len as usize,
+        }
+    }
+
+    pub fn is_aggregate(&self) -> bool {
+        self.size() > 8
+    }
+
     pub fn is_signed(&self) -> bool {
         use Type::*;
         matches!(self, I8 | I16 | I32 | I64)
@@ -48,6 +66,7 @@ impl Type {
             Char => TypeKind::Char,
             Str | Ptr(_) => TypeKind::Ptr,
             Unit => TypeKind::Unit,
+            Array(..) => TypeKind::Array,
         }
     }
 }
@@ -69,6 +88,7 @@ impl Display for Type {
             Str => f.write_str("str"),
             Unit => f.write_str("()"),
             Ptr(ty) => write!(f, "{ty}*"),
+            Array(ty, len) => write!(f, "{ty}[{len}]"),
         }
     }
 }
@@ -130,6 +150,7 @@ pub enum Expr<'src> {
     ),
     Call(Spanned<&'src str>, Spanned<Vec<Spanned<Self>>>),
     As(Box<Self>, Type, SimpleSpan),
+    Index(Spanned<Box<Self>>, Spanned<Box<Self>>),
 }
 
 #[derive(Debug)]

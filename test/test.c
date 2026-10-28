@@ -23,3 +23,7 @@ unsigned int fact_c(unsigned int n) {
         return n * fact_c(n - 1);
     }
 }
+
+int sum_array_c(int array[5]) {
+    return array[0] + array[1] + array[2] + array[3] + array[4];
+}

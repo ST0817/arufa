@@ -158,6 +158,29 @@ fn char_test() {
     assert("char compare", 'A' < 'B');
 }
 
+fn sum_array(array: i32[5]) -> i32 {
+    array[0] + array[1] + array[2] + array[3] + array[4]
+}
+
+// extern fn sum_array_c(i32[5]) -> i32;
+
+fn array_test() {
+    var array1: i32[5];
+    array1[0] = 1;
+    array1[1] = 2;
+    array1[2] = 3;
+    array1[3] = 4;
+    array1[4] = 5;
+    assert_i32("array", array1[0] + array1[1] + array1[2] + array1[3] + array1[4], 15);
+    assert_i32("array argument function", sum_array(array1), 15);
+    // not supported
+    // assert_i32("array argument C function from Arufa", sum_array_c(array1), 15);
+
+    var array2: i32[5];
+    array2 = array1;
+    assert_i32("array assignment", sum_array(array2), 15);
+}
+
 fn main() -> i32 {
     bin_test();
     unary_test();
@@ -166,6 +189,7 @@ fn main() -> i32 {
     fn_test();
     cast_test();
     char_test();
+    array_test();
 
     print("OK\n");
     0

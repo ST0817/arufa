@@ -8,17 +8,21 @@ use crate::{
 pub enum CheckedLValueExprKind {
     Var(VarId),
     Deref(CheckedExpr),
+    Index(CheckedLValueExpr, CheckedExpr),
 }
 
 #[derive(Debug)]
 pub struct CheckedLValueExpr {
-    kind: CheckedLValueExprKind,
+    kind: Box<CheckedLValueExprKind>,
     ty: Type,
 }
 
 impl CheckedLValueExpr {
     pub fn new(kind: CheckedLValueExprKind, ty: Type) -> Self {
-        Self { kind, ty }
+        Self {
+            kind: Box::new(kind),
+            ty,
+        }
     }
 
     pub fn kind(&self) -> &CheckedLValueExprKind {

@@ -17,6 +17,7 @@ pub enum CheckErrorKind {
     UndefinedVariable,
     TypeMismatch { expected: Type, found: Type },
     CannotGetAddress,
+    CannotIndex(Type),
     NotIntType(Type),
     NotPtrType(Type),
     CannotBeCompared(Type, Type),
@@ -36,6 +37,7 @@ impl Display for CheckErrorKind {
                 write!(f, "type mismatch: expected {expected}, found {found}")
             }
             CannotGetAddress => f.write_str("cannot get address"),
+            CannotIndex(ty) => write!(f, "cannot index into value of {ty}"),
             NotIntType(ty) => write!(f, "{ty} is not an integer type"),
             NotPtrType(ty) => write!(f, "{ty} is not a pointer type"),
             CannotBeCompared(type1, type2) => write!(f, "{type1} cannot be compared to {type2}"),

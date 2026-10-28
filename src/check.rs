@@ -89,6 +89,30 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         ))
     }
 
+    fn check_index_lvalue(
+        &self,
+        array: &Expr<'src>,
+        array_span: &SimpleSpan,
+        index: &Expr<'src>,
+        index_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedLValueExpr> {
+        let checked_expr_lvalue = self.check_lvalue(array, array_span, scope)?;
+        let Type::Array(elem_type, _) = checked_expr_lvalue.ty() else {
+            return Err(CheckError::new(
+                CannotIndex(checked_expr_lvalue.ty().clone()),
+                *array_span,
+            ));
+        };
+        let checked_index = self.check_expr(index, scope)?;
+        check_int_type(checked_index.ty(), index_span)?;
+        let ty = elem_type.as_ref().clone();
+        Ok(CheckedLValueExpr::new(
+            CheckedLValueExprKind::Index(checked_expr_lvalue, checked_index),
+            ty,
+        ))
+    }
+
     fn check_lvalue(
         &self,
         expr: &Expr<'src>,
@@ -99,6 +123,9 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         match expr {
             Var(name) => self.check_var_lvalue(name, scope),
             Deref(expr) => self.check_deref_lvalue(expr, &expr.span, scope),
+            Index(array, index) => {
+                self.check_index_lvalue(array, &array.span, index, &index.span, scope)
+            }
             _ => Err(CheckError::new(CannotGetAddress, *expr_span)),
         }
     }
@@ -341,7 +368,7 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         use {CastRule::*, TypeKind::*};
         let value = self.check_expr(expr, scope)?;
         let rule = match (value.ty().kind(), ty.kind()) {
-            (Unit, _) | (_, Unit) => {
+            (Unit | Array, _) | (_, Unit | Array) => {
                 return Err(CheckError::new(
                     CannotBeCast {
                         from: value.ty().clone(),
@@ -358,6 +385,23 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         Ok(CheckedExpr::new(
             CheckedExprKind::As(value, ty.clone(), rule),
             ty.clone(),
+        ))
+    }
+
+    fn check_index_expr(
+        &self,
+        expr: &Expr<'src>,
+        expr_span: &SimpleSpan,
+        index: &Expr<'src>,
+        index_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lvalue_expr =
+            self.check_index_lvalue(expr, expr_span, index, index_span, scope)?;
+        let ty = checked_lvalue_expr.ty().clone();
+        Ok(CheckedExpr::new(
+            CheckedExprKind::LValue(checked_lvalue_expr),
+            ty,
         ))
     }
 
@@ -387,6 +431,9 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
             If(cond, then, els) => self.check_if_expr(cond, &cond.span, then, els.as_ref(), scope),
             Call(name, args) => self.check_call_expr(name, args, scope),
             As(expr, ty, span) => self.check_as_expr(expr, ty, span, scope),
+            Index(expr, index) => {
+                self.check_index_expr(expr, &expr.span, index, &index.span, scope)
+            }
         }
     }
 

@@ -40,13 +40,20 @@ fn symbols<'src>() -> impl Tokenizer<'src, Token<'src>> {
         just(':').to(Colon),
         just(';').to(Semic),
         just(',').to(Comma),
+    ))
+}
+
+fn delims<'src>() -> impl Tokenizer<'src, Token<'src>> {
+    use Token::*;
+    choice((
         just('(').to(LParen),
         just(')').to(RParen),
         just('{').to(LBrace),
         just('}').to(RBrace),
+        just('[').to(LBracket),
+        just(']').to(RBracket),
     ))
 }
-
 fn keywords<'src>() -> impl Tokenizer<'src, Token<'src>> {
     use Token::*;
     choice((
@@ -143,7 +150,7 @@ fn skip<'src>() -> impl Tokenizer<'src, ()> {
 }
 
 fn tokenizer<'src>() -> impl Tokenizer<'src, Vec<Spanned<Token<'src>>>> {
-    choice((symbols(), keywords(), lits(), name()))
+    choice((symbols(), delims(), keywords(), lits(), name()))
         .spanned()
         .padded_by(skip())
         .repeated()

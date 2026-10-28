@@ -57,6 +57,10 @@ impl<'ctx> Compiler<'ctx> {
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
             Unit => self.context.struct_type(&[], false).as_basic_type_enum(),
+            Array(ty, len) => self
+                .llvm_type_of(ty)
+                .array_type(*len as u32)
+                .as_basic_type_enum(),
         }
     }
 
@@ -77,6 +81,26 @@ impl<'ctx> Compiler<'ctx> {
         Ok(value.into_pointer_value())
     }
 
+    fn compile_index_lvalue(
+        &self,
+        expr: &CheckedLValueExpr,
+        index: &CheckedExpr,
+        elem_type: &Type,
+        locals: &mut Locals<'ctx>,
+    ) -> Result<PointerValue<'ctx>> {
+        let expr_ptr = self.compile_lvalue(expr, locals)?;
+        let index_value = self.compile_expr(index, locals)?;
+        let elem_ptr = unsafe {
+            self.builder.build_in_bounds_gep(
+                self.llvm_type_of(elem_type),
+                expr_ptr,
+                &[index_value.into_int_value()],
+                "",
+            )?
+        };
+        Ok(elem_ptr)
+    }
+
     fn compile_lvalue(
         &self,
         expr: &CheckedLValueExpr,
@@ -86,6 +110,7 @@ impl<'ctx> Compiler<'ctx> {
         match expr.kind() {
             Var(id) => self.compile_var_lvalue(id, locals),
             Deref(expr) => self.compile_deref_lvalue(expr, locals),
+            Index(array, index) => self.compile_index_lvalue(array, index, expr.ty(), locals),
         }
     }
 
@@ -249,10 +274,14 @@ impl<'ctx> Compiler<'ctx> {
         locals: &mut Locals<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>> {
         let ptr = self.compile_lvalue(expr, locals)?;
-        let value = self
-            .builder
-            .build_load(self.llvm_type_of(expr.ty()), ptr, "")?;
-        Ok(value.as_basic_value_enum())
+        let value = if expr.ty().is_aggregate() {
+            ptr.as_basic_value_enum()
+        } else {
+            self.builder
+                .build_load(self.llvm_type_of(expr.ty()), ptr, "")?
+                .as_basic_value_enum()
+        };
+        Ok(value)
     }
 
     fn compile_if_expr(
@@ -405,6 +434,12 @@ impl<'ctx> Compiler<'ctx> {
     ) -> Result<()> {
         let ptr = self.compile_lvalue(target, locals)?;
         let value = self.compile_expr(expr, locals)?;
+        let value = if expr.ty().is_aggregate() {
+            self.builder
+                .build_load(self.llvm_type_of(expr.ty()), value.into_pointer_value(), "")?
+        } else {
+            value
+        };
         self.builder.build_store(ptr, value)?;
         Ok(())
     }
@@ -444,7 +479,13 @@ impl<'ctx> Compiler<'ctx> {
                 .sig()
                 .params()
                 .iter()
-                .map(|param_type| self.llvm_type_of(param_type).into())
+                .map(|param_type| {
+                    if param_type.is_aggregate() {
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else {
+                        self.llvm_type_of(param_type).into()
+                    }
+                })
                 .collect::<Vec<_>>();
             let llvm_func_type = if let Type::Unit = func_decl.sig().ret() {
                 self.context.void_type().fn_type(&llvm_param_types, false)
@@ -473,6 +514,15 @@ impl<'ctx> Compiler<'ctx> {
                 .builder
                 .build_alloca(self.llvm_type_of(param.ty()), "")?;
             let value = func_value.get_nth_param(i as u32).unwrap();
+            let value = if param.ty().is_aggregate() {
+                self.builder.build_load(
+                    self.llvm_type_of(param.ty()),
+                    value.into_pointer_value(),
+                    "",
+                )?
+            } else {
+                value
+            };
             self.builder.build_store(ptr, value)?;
             locals.insert(param.id(), ptr);
         }

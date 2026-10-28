@@ -98,17 +98,21 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         scope: &mut Scope<'src>,
     ) -> Result<CheckedLValueExpr> {
         let checked_expr_lvalue = self.check_lvalue(array, array_span, scope)?;
-        let Type::Array(elem_type, _) = checked_expr_lvalue.ty() else {
-            return Err(CheckError::new(
-                CannotIndex(checked_expr_lvalue.ty().clone()),
-                *array_span,
-            ));
+        let (elem_type, is_ptr) = match checked_expr_lvalue.ty() {
+            Type::Array(elem_type, _) => (elem_type.clone(), false),
+            Type::ArrayPtr(elem_type) => (elem_type.clone(), true),
+            _ => {
+                return Err(CheckError::new(
+                    CannotIndex(checked_expr_lvalue.ty().clone()),
+                    *array_span,
+                ));
+            }
         };
         let checked_index = self.check_expr(index, scope)?;
         check_int_type(checked_index.ty(), index_span)?;
         let ty = elem_type.as_ref().clone();
         Ok(CheckedLValueExpr::new(
-            CheckedLValueExprKind::Index(checked_expr_lvalue, checked_index),
+            CheckedLValueExprKind::Index(checked_expr_lvalue, is_ptr, checked_index),
             ty,
         ))
     }

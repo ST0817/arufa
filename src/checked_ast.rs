@@ -8,7 +8,7 @@ use crate::{
 pub enum CheckedLValueExprKind {
     Var(VarId),
     Deref(CheckedExpr),
-    Index(CheckedLValueExpr, CheckedExpr),
+    Index(CheckedLValueExpr, bool, CheckedExpr),
 }
 
 #[derive(Debug)]

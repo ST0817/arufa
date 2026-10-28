@@ -179,6 +179,15 @@ fn array_test() {
     var array2: i32[5];
     array2 = array1;
     assert_i32("array assignment", sum_array(array2), 15);
+
+    var array_ptr: i32[];
+    array_ptr = &array1 as i32[];
+    array_ptr[0] = 6;
+    array_ptr[1] = 7;
+    array_ptr[2] = 8;
+    array_ptr[3] = 9;
+    array_ptr[4] = 10;
+    assert_i32("array pointer", sum_array(array1), 40);
 }
 
 fn main() -> i32 {

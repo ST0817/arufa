@@ -28,6 +28,7 @@ pub enum Type {
     Unit,
     Ptr(Box<Self>),
     Array(Box<Self>, u64),
+    ArrayPtr(Box<Self>),
 }
 
 impl Type {
@@ -38,7 +39,7 @@ impl Type {
             U8 | I8 | Bool | Char => 1,
             U16 | I16 => 2,
             U32 | I32 => 4,
-            U64 | I64 | Ptr(_) | Str => 8,
+            U64 | I64 | Ptr(_) | Str | ArrayPtr(_) => 8,
             Array(ty, len) => ty.size() * *len as usize,
         }
     }
@@ -64,7 +65,7 @@ impl Type {
             U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 => TypeKind::Int,
             Bool => TypeKind::Bool,
             Char => TypeKind::Char,
-            Str | Ptr(_) => TypeKind::Ptr,
+            Str | Ptr(_) | ArrayPtr(_) => TypeKind::Ptr,
             Unit => TypeKind::Unit,
             Array(..) => TypeKind::Array,
         }
@@ -89,6 +90,7 @@ impl Display for Type {
             Unit => f.write_str("()"),
             Ptr(ty) => write!(f, "{ty}*"),
             Array(ty, len) => write!(f, "{ty}[{len}]"),
+            ArrayPtr(ty) => write!(f, "{ty}[]"),
         }
     }
 }

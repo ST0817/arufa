@@ -97,10 +97,23 @@ fn array_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
         .map(|(ty, len)| Type::Array(ty, len))
 }
 
+fn array_ptr_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
+    ty: impl Parser<'tokens, 'src, I, Type>,
+) -> impl Parser<'tokens, 'src, I, Type> {
+    ty.map(Box::new)
+        .then_ignore(brackets(empty()))
+        .map(|ty| Type::ArrayPtr(ty))
+}
+
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>
 {
     let atom = atom_type();
-    choice((ptr_type(atom.clone()), array_type(atom.clone()), atom))
+    choice((
+        ptr_type(atom.clone()),
+        array_type(atom.clone()),
+        array_ptr_type(atom.clone()),
+        atom,
+    ))
 }
 
 fn int_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()

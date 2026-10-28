@@ -52,7 +52,7 @@ impl<'ctx> Compiler<'ctx> {
             U32 | I32 => self.context.i32_type().as_basic_type_enum(),
             U64 | I64 => self.context.i64_type().as_basic_type_enum(),
             Bool => self.context.bool_type().as_basic_type_enum(),
-            Ptr(_) | Str => self
+            Ptr(_) | Str | ArrayPtr(_) => self
                 .context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),
@@ -84,11 +84,19 @@ impl<'ctx> Compiler<'ctx> {
     fn compile_index_lvalue(
         &self,
         expr: &CheckedLValueExpr,
+        is_ptr: bool,
         index: &CheckedExpr,
         elem_type: &Type,
         locals: &mut Locals<'ctx>,
     ) -> Result<PointerValue<'ctx>> {
         let expr_ptr = self.compile_lvalue(expr, locals)?;
+        let expr_ptr = if is_ptr {
+            self.builder
+                .build_load(self.context.ptr_type(AddressSpace::default()), expr_ptr, "")?
+                .into_pointer_value()
+        } else {
+            expr_ptr
+        };
         let index_value = self.compile_expr(index, locals)?;
         let elem_ptr = unsafe {
             self.builder.build_in_bounds_gep(
@@ -110,7 +118,9 @@ impl<'ctx> Compiler<'ctx> {
         match expr.kind() {
             Var(id) => self.compile_var_lvalue(id, locals),
             Deref(expr) => self.compile_deref_lvalue(expr, locals),
-            Index(array, index) => self.compile_index_lvalue(array, index, expr.ty(), locals),
+            Index(array, is_ptr, index) => {
+                self.compile_index_lvalue(array, *is_ptr, index, expr.ty(), locals)
+            }
         }
     }
 

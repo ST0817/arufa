@@ -4,8 +4,8 @@ use chumsky::span::{SimpleSpan, Spanned};
 
 use crate::{
     ast::{
-        ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type,
-        TypeKind,
+        ArithBinOp, Block, CastType, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt,
+        Type,
     },
     checked_ast::{
         CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedFunc, CheckedLValueExpr,
@@ -45,7 +45,7 @@ fn check_bool_type(ty: &Type, span: &SimpleSpan) -> Result<()> {
 }
 
 fn check_int_type(ty: &Type, span: &SimpleSpan) -> Result<()> {
-    let TypeKind::Int = ty.kind() else {
+    if !ty.is_int() {
         return Err(CheckError::new(NotIntType(ty.clone()), *span));
     };
     Ok(())
@@ -369,22 +369,20 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         span: &SimpleSpan,
         scope: &mut Scope<'src>,
     ) -> Result<CheckedExpr> {
-        use {CastRule::*, TypeKind::*};
+        use {CastRule::*, CastType::*};
         let value = self.check_expr(expr, scope)?;
-        let rule = match (value.ty().kind(), ty.kind()) {
-            (Unit | Array, _) | (_, Unit | Array) => {
-                return Err(CheckError::new(
-                    CannotBeCast {
-                        from: value.ty().clone(),
-                        to: ty.clone(),
-                    },
-                    *span,
-                ));
-            }
-            (Int | Bool | Char, Int | Bool | Char) => IntToInt(value.ty().is_signed()),
-            (Ptr, Int | Bool | Char) => PtrToInt,
-            (Int | Bool | Char, Ptr) => IntToPtr,
+        let rule = match (value.ty().cast_type(), ty.cast_type()) {
+            (Int(_), Int(is_signed)) => IntToInt(is_signed),
+            (Ptr, Int(_)) => PtrToInt,
+            (Int(_), Ptr) => IntToPtr,
             (Ptr, Ptr) => PtrToPtr,
+            _ => {
+                let error_kind = CannotBeCast {
+                    from: value.ty().clone(),
+                    to: ty.clone(),
+                };
+                return Err(CheckError::new(error_kind, *span));
+            }
         };
         Ok(CheckedExpr::new(
             CheckedExprKind::As(value, ty.clone(), rule),

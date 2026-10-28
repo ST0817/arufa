@@ -102,7 +102,7 @@ fn array_ptr_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
 ) -> impl Parser<'tokens, 'src, I, Type> {
     ty.map(Box::new)
         .then_ignore(brackets(empty()))
-        .map(|ty| Type::ArrayPtr(ty))
+        .map(Type::ArrayPtr)
 }
 
 fn ty<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>() -> impl Parser<'tokens, 'src, I, Type>

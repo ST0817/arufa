@@ -3,13 +3,10 @@ use std::fmt::{self, Display, Formatter};
 use chumsky::span::{SimpleSpan, Spanned};
 
 #[derive(Debug, Clone, Copy)]
-pub enum TypeKind {
-    Int,
-    Bool,
-    Char,
+pub enum CastType {
+    Int(bool),
     Ptr,
-    Unit,
-    Array,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,31 +41,28 @@ impl Type {
         }
     }
 
-    pub fn is_aggregate(&self) -> bool {
-        self.size() > 8
-    }
-
-    pub fn is_signed(&self) -> bool {
+    pub fn is_int(&self) -> bool {
         use Type::*;
-        matches!(self, I8 | I16 | I32 | I64)
+        matches!(self, U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64)
     }
 
     pub fn is_comparable_to(&self, other: &Type) -> bool {
         use Type::*;
-        matches!((self.kind(), other.kind()), (TypeKind::Int, TypeKind::Int))
-            || matches!((self, other), (Char, Char))
+        self.is_int() && other.is_int() || matches!((self, other), (Char, Char))
     }
 
-    pub fn kind(&self) -> TypeKind {
+    pub fn cast_type(&self) -> CastType {
         use Type::*;
         match self {
-            U8 | U16 | U32 | U64 | I8 | I16 | I32 | I64 => TypeKind::Int,
-            Bool => TypeKind::Bool,
-            Char => TypeKind::Char,
-            Str | Ptr(_) | ArrayPtr(_) => TypeKind::Ptr,
-            Unit => TypeKind::Unit,
-            Array(..) => TypeKind::Array,
+            U8 | U16 | U32 | U64 | Bool | Char => CastType::Int(false),
+            I8 | I16 | I32 | I64 => CastType::Int(true),
+            Ptr(_) | ArrayPtr(_) | Str => CastType::Ptr,
+            Array(..) | Unit => CastType::None,
         }
+    }
+
+    pub fn is_aggregate(&self) -> bool {
+        self.size() > 8
     }
 }
 

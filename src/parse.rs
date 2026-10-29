@@ -12,7 +12,10 @@ use chumsky::{
 };
 
 use crate::{
-    ast::{ArithBinOp, Block, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt, Type},
+    ast::{
+        ArithBinOp, Block, CmpBinOp, EqCmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt,
+        Type,
+    },
     error::Error,
     token::{
         Lit,
@@ -227,7 +230,7 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
     expr: impl Parser<'tokens, 'src, I, Expr<'src>>,
 ) -> impl Parser<'tokens, 'src, I, Expr<'src>> {
     use {
-        Expr::{ArithBin, CmpBin, LogicBin, ShiftBin},
+        Expr::{ArithBin, CmpBin, EqCmpBin, LogicBin, ShiftBin},
         Token::*,
     };
     expr.clone()
@@ -249,8 +252,8 @@ fn op_expr<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>(
             infix_op(left(5), Amp, ArithBinOp::And, ArithBin),
             infix_op(left(4), Hat, ArithBinOp::Xor, ArithBin),
             infix_op(left(3), Pipe, ArithBinOp::Or, ArithBin),
-            infix_op(left(2), Eq, CmpBinOp::Eq, CmpBin),
-            infix_op(left(2), NotEq, CmpBinOp::NotEq, CmpBin),
+            infix_op(left(2), Eq, EqCmpBinOp::Eq, EqCmpBin),
+            infix_op(left(2), NotEq, EqCmpBinOp::NotEq, EqCmpBin),
             infix_op(left(2), LT, CmpBinOp::LT, CmpBin),
             infix_op(left(2), LE, CmpBinOp::LE, CmpBin),
             infix_op(left(2), GT, CmpBinOp::GT, CmpBin),

@@ -10,7 +10,7 @@ use inkwell::{
 };
 
 use crate::{
-    ast::{ArithBinOp, CmpBinOp, LogicBinOp, ShiftBinOp, Type},
+    ast::{ArithBinOp, CmpBinOp, EqCmpBinOp, LogicBinOp, ShiftBinOp, Type},
     checked_ast::{
         CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedFunc, CheckedLValueExpr,
         CheckedLValueExprKind, CheckedStmt,
@@ -206,6 +206,28 @@ impl<'ctx> Compiler<'ctx> {
         Ok(value.as_basic_value_enum())
     }
 
+    fn compile_eq_cmp_bin_expr(
+        &self,
+        lhs: &CheckedExpr,
+        op: EqCmpBinOp,
+        rhs: &CheckedExpr,
+        locals: &mut Locals<'ctx>,
+    ) -> Result<BasicValueEnum<'ctx>> {
+        use EqCmpBinOp::*;
+        let lhs_value = self.compile_expr(lhs, locals)?.into_int_value();
+        let rhs_value = self.compile_expr(rhs, locals)?.into_int_value();
+        let value = self.builder.build_int_compare(
+            match op {
+                Eq => IntPredicate::EQ,
+                NotEq => IntPredicate::NE,
+            },
+            lhs_value,
+            rhs_value,
+            "cmp",
+        )?;
+        Ok(value.as_basic_value_enum())
+    }
+
     fn compile_cmp_bin_expr(
         &self,
         lhs: &CheckedExpr,
@@ -213,17 +235,24 @@ impl<'ctx> Compiler<'ctx> {
         rhs: &CheckedExpr,
         locals: &mut Locals<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>> {
-        use CmpBinOp::*;
+        use {CmpBinOp::*, IntPredicate::*};
         let lhs_value = self.compile_expr(lhs, locals)?.into_int_value();
         let rhs_value = self.compile_expr(rhs, locals)?.into_int_value();
         let value = self.builder.build_int_compare(
-            match op {
-                Eq => IntPredicate::EQ,
-                NotEq => IntPredicate::NE,
-                LT => IntPredicate::SLT,
-                LE => IntPredicate::SLE,
-                GT => IntPredicate::SGT,
-                GE => IntPredicate::SGE,
+            if lhs.ty().is_signed() {
+                match op {
+                    LT => SLT,
+                    LE => SLE,
+                    GT => SGT,
+                    GE => SGE,
+                }
+            } else {
+                match op {
+                    LT => ULT,
+                    LE => ULE,
+                    GT => UGT,
+                    GE => UGE,
+                }
             },
             lhs_value,
             rhs_value,
@@ -419,6 +448,7 @@ impl<'ctx> Compiler<'ctx> {
             LValue(expr) => self.compile_lvalue_expr(expr, locals),
             ArithBin(lhs, op, rhs) => self.compile_arith_bin_expr(lhs, *op, rhs, locals),
             ShiftBin(lhs, op, rhs) => self.compile_shift_bin_expr(lhs, *op, rhs, locals),
+            EqCmpBin(lhs, op, rhs) => self.compile_eq_cmp_bin_expr(lhs, *op, rhs, locals),
             CmpBin(lhs, op, rhs) => self.compile_cmp_bin_expr(lhs, *op, rhs, locals),
             LogicBin(lhs, op, rhs) => self.compile_logic_bin_expr(lhs, *op, rhs, locals),
             Neg(expr) => self.compile_neg_expr(expr, locals),

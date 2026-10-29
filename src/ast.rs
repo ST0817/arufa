@@ -4,7 +4,7 @@ use chumsky::span::{SimpleSpan, Spanned};
 
 #[derive(Debug, Clone, Copy)]
 pub enum CastType {
-    Int(bool),
+    Int,
     Ptr,
     None,
 }
@@ -50,12 +50,20 @@ impl Type {
         use Type::*;
         self.is_int() && other.is_int() || matches!((self, other), (Char, Char))
     }
+    pub fn is_eq_comparable_to(&self, other: &Type) -> bool {
+        use Type::*;
+        self.is_comparable_to(other) || matches!((self, other), (Bool, Bool))
+    }
+
+    pub fn is_signed(&self) -> bool {
+        use Type::*;
+        matches!(self, I8 | I16 | I32 | I64)
+    }
 
     pub fn cast_type(&self) -> CastType {
         use Type::*;
         match self {
-            U8 | U16 | U32 | U64 | Bool | Char => CastType::Int(false),
-            I8 | I16 | I32 | I64 => CastType::Int(true),
+            U8 | U16 | U32 | U64 | Bool | Char | I8 | I16 | I32 | I64 => CastType::Int,
             Ptr(_) | ArrayPtr(_) | Str => CastType::Ptr,
             Array(..) | Unit => CastType::None,
         }
@@ -108,9 +116,13 @@ pub enum ShiftBinOp {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum CmpBinOp {
+pub enum EqCmpBinOp {
     Eq,
     NotEq,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CmpBinOp {
     LT,
     LE,
     GT,
@@ -133,6 +145,7 @@ pub enum Expr<'src> {
     Var(Spanned<&'src str>),
     ArithBin(Spanned<Box<Self>>, ArithBinOp, Spanned<Box<Self>>),
     ShiftBin(Spanned<Box<Self>>, ShiftBinOp, Spanned<Box<Self>>),
+    EqCmpBin(Spanned<Box<Self>>, EqCmpBinOp, Spanned<Box<Self>>),
     CmpBin(Spanned<Box<Self>>, CmpBinOp, Spanned<Box<Self>>),
     LogicBin(Spanned<Box<Self>>, LogicBinOp, Spanned<Box<Self>>),
     Neg(Spanned<Box<Self>>),

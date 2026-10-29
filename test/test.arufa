@@ -49,10 +49,18 @@ fn bin_test() {
     assert_i32("bitwise and", 3 & 2, 2);
     assert_i32("bitwise or", 3 | 2, 3);
     assert_i32("bitwise xor", 3 ^ 2, 1);
-    assert("equal", 0 == 0);
-    assert("not equal", 0 != 1);
-    assert("less than", 0 < 1);
-    assert("more than", 1 > 0);
+    assert("equal (int)", 0 == 0);
+    assert("equal (bool)", true == true);
+    assert("equal (char)", 'A' == 'A');
+    assert("not equal (int)", 0 != 1);
+    assert("not equal (bool)", true != false);
+    assert("not equal (char)", 'A' != 'B');
+    assert("less than (unsigned int)", 0 as u8 < 255 as u8);
+    assert("less than (signed int)", -1 < 0);
+    assert("less than (char)", 'A' < 'B');
+    assert("more than (unsigned int)", 255 as u8 > 0 as u8);
+    assert("more than (signed int)", 0 > -1);
+    assert("more than (char)", 'B' > 'A');
     assert("less than or equal (less than)", 0 <= 1);
     assert("less than or equal (equal)", 0 <= 0);
     assert("more than or equal (less than)", 1 >= 0);
@@ -151,13 +159,6 @@ fn cast_test() {
     assert_i32("cast bool to i32", c as i32, 1);
 }
 
-fn char_test() {
-    var c: char;
-    c = 'A';
-    assert_i32("char cast to u8", c as i32, 65);
-    assert("char compare", 'A' < 'B');
-}
-
 fn sum_array(array: i32[5]) -> i32 {
     array[0] + array[1] + array[2] + array[3] + array[4]
 }
@@ -197,7 +198,6 @@ fn main() -> i32 {
     if_test();
     fn_test();
     cast_test();
-    char_test();
     array_test();
 
     print("OK\n");

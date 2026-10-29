@@ -20,7 +20,8 @@ pub enum CheckErrorKind {
     CannotIndex(Type),
     NotIntType(Type),
     NotPtrType(Type),
-    CannotBeCompared(Type, Type),
+    NotComparable(Type, Type),
+    NotEqComparable(Type, Type),
     CannotBeCast { from: Type, to: Type },
     UndefinedFunction,
     ArgNumMismatch,
@@ -40,7 +41,10 @@ impl Display for CheckErrorKind {
             CannotIndex(ty) => write!(f, "cannot index into value of {ty}"),
             NotIntType(ty) => write!(f, "{ty} is not an integer type"),
             NotPtrType(ty) => write!(f, "{ty} is not a pointer type"),
-            CannotBeCompared(type1, type2) => write!(f, "{type1} cannot be compared to {type2}"),
+            NotComparable(type1, type2) => write!(f, "{type1} is not comparable to {type2}"),
+            NotEqComparable(type1, type2) => {
+                write!(f, "{type1} is not equality comparable to {type2}")
+            }
             CannotBeCast { from, to } => write!(f, "{from} cannot be cast to {to}"),
             UndefinedFunction => f.write_str("undefined function"),
             ArgNumMismatch => f.write_str("the number of arguments does not match"),

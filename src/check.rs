@@ -4,8 +4,8 @@ use chumsky::span::{SimpleSpan, Spanned};
 
 use crate::{
     ast::{
-        ArithBinOp, Block, CastType, CmpBinOp, Expr, Item, LogicBinOp, Param, ShiftBinOp, Stmt,
-        Type,
+        ArithBinOp, Block, CastType, CmpBinOp, EqCmpBinOp, Expr, Item, LogicBinOp, Param,
+        ShiftBinOp, Stmt, Type,
     },
     checked_ast::{
         CastRule, CheckedBlock, CheckedExpr, CheckedExprKind, CheckedFunc, CheckedLValueExpr,
@@ -207,6 +207,28 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         ))
     }
 
+    fn check_eq_cmp_bin_expr(
+        &self,
+        lhs: &Expr<'src>,
+        op: EqCmpBinOp,
+        rhs: &Expr<'src>,
+        rhs_span: &SimpleSpan,
+        scope: &mut Scope<'src>,
+    ) -> Result<CheckedExpr> {
+        let checked_lhs = self.check_expr(lhs, scope)?;
+        let checked_rhs = self.check_expr(rhs, scope)?;
+        if !checked_lhs.ty().is_eq_comparable_to(checked_rhs.ty()) {
+            return Err(CheckError::new(
+                NotEqComparable(checked_lhs.ty().clone(), checked_rhs.ty().clone()),
+                *rhs_span,
+            ));
+        }
+        Ok(CheckedExpr::new(
+            CheckedExprKind::EqCmpBin(checked_lhs, op, checked_rhs),
+            Type::Bool,
+        ))
+    }
+
     fn check_cmp_bin_expr(
         &self,
         lhs: &Expr<'src>,
@@ -219,7 +241,7 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         let checked_rhs = self.check_expr(rhs, scope)?;
         if !checked_lhs.ty().is_comparable_to(checked_rhs.ty()) {
             return Err(CheckError::new(
-                CannotBeCompared(checked_lhs.ty().clone(), checked_rhs.ty().clone()),
+                NotComparable(checked_lhs.ty().clone(), checked_rhs.ty().clone()),
                 *rhs_span,
             ));
         }
@@ -370,22 +392,22 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
         scope: &mut Scope<'src>,
     ) -> Result<CheckedExpr> {
         use {CastRule::*, CastType::*};
-        let value = self.check_expr(expr, scope)?;
-        let rule = match (value.ty().cast_type(), ty.cast_type()) {
-            (Int(_), Int(is_signed)) => IntToInt(is_signed),
-            (Ptr, Int(_)) => PtrToInt,
-            (Int(_), Ptr) => IntToPtr,
+        let checked_expr = self.check_expr(expr, scope)?;
+        let rule = match (checked_expr.ty().cast_type(), ty.cast_type()) {
+            (Int, Int) => IntToInt(checked_expr.ty().is_signed()),
+            (Ptr, Int) => PtrToInt,
+            (Int, Ptr) => IntToPtr,
             (Ptr, Ptr) => PtrToPtr,
             _ => {
                 let error_kind = CannotBeCast {
-                    from: value.ty().clone(),
+                    from: checked_expr.ty().clone(),
                     to: ty.clone(),
                 };
                 return Err(CheckError::new(error_kind, *span));
             }
         };
         Ok(CheckedExpr::new(
-            CheckedExprKind::As(value, ty.clone(), rule),
+            CheckedExprKind::As(checked_expr, ty.clone(), rule),
             ty.clone(),
         ))
     }
@@ -422,6 +444,7 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
             ShiftBin(lhs, op, rhs) => {
                 self.check_shift_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)
             }
+            EqCmpBin(lhs, op, rhs) => self.check_eq_cmp_bin_expr(lhs, *op, rhs, &rhs.span, scope),
             CmpBin(lhs, op, rhs) => self.check_cmp_bin_expr(lhs, *op, rhs, &rhs.span, scope),
             LogicBin(lhs, op, rhs) => {
                 self.check_logic_bin_expr(lhs, &lhs.span, *op, rhs, &rhs.span, scope)

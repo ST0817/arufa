@@ -1,5 +1,5 @@
 use crate::{
-    ast::{ArithBinOp, CmpBinOp, LogicBinOp, ShiftBinOp, Type},
+    ast::{ArithBinOp, CmpBinOp, EqCmpBinOp, LogicBinOp, ShiftBinOp, Type},
     scope::VarId,
     symbols::FuncId,
 };
@@ -52,6 +52,7 @@ pub enum CheckedExprKind {
     LValue(CheckedLValueExpr),
     ArithBin(CheckedExpr, ArithBinOp, CheckedExpr),
     ShiftBin(CheckedExpr, ShiftBinOp, CheckedExpr),
+    EqCmpBin(CheckedExpr, EqCmpBinOp, CheckedExpr),
     CmpBin(CheckedExpr, CmpBinOp, CheckedExpr),
     LogicBin(CheckedExpr, LogicBinOp, CheckedExpr),
     Neg(CheckedExpr),

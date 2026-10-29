@@ -47,6 +47,12 @@ pub fn emit(cli: &Cli, module: &Module) -> Result<(), Error> {
         Emit::Ir => module
             .print_to_file(cli.out_path())
             .map_err(|error| Error::IO(io::Error::other(error.to_string()))),
+        Emit::Asm => {
+            target_machine
+                .write_to_file(module, FileType::Assembly, cli.out_path())
+                .map_err(|error| Error::IO(io::Error::other(error.to_string())))?;
+            Ok(())
+        }
         Emit::Obj => {
             module
                 .run_passes("function(mem2reg)", &target_machine, passes_options)

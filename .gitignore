@@ -9,6 +9,12 @@
 /target
 
 # test
-/test/test.ll
+/test/test-llvm.ll
+/test/test-llvm.s
+/test/test-llvm.o
+/test/test-llvm
+/test/test-asm.s
+/test/test-asm.o
+/test/test-asm
 /test/test.o
 /test/test

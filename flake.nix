@@ -30,64 +30,95 @@
           ...
         }:
         let
-          toolchain = pkgs.fenix.fromToolchainFile {
+          llvmPackages = pkgs.llvmPackages_23;
+          stdenv = llvmPackages.stdenv;
+          llvm = llvmPackages.llvm;
+          libffi = pkgs.libffi;
+          zlib = pkgs.zlib;
+          libxml2 = pkgs.libxml2;
+          toolchain = fenix.packages.${system}.fromToolchainFile {
             file = ./rust-toolchain.toml;
             sha256 = "sha256-V6dLt89/mszjKbYHRZ2s6fSfFTvoMrTv9o1Y4BDCMWk=";
           };
-          craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+          craneLibBase = crane.mkLib pkgs;
+          craneLibWithToolchain = craneLibBase.overrideToolchain toolchain;
+          craneLib = craneLibWithToolchain.overrideScope (
+            _: _: {
+              stdenvSelector = _: stdenv;
+            }
+          );
           src = craneLib.cleanCargoSource ./.;
-          buildInputs = with pkgs; [
+          buildInputs = [
             libffi
             zlib
             libxml2
-            stdenv.cc.cc.lib
+            pkgs.stdenv.cc.cc
           ];
           commonArgs = {
             inherit src;
             strictDeps = true;
             nativeBuildInputs = with pkgs; [
-              llvmPackages_23.llvm
+              llvm
               autoPatchelfHook
             ];
             inherit buildInputs;
           };
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-          crate = craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
-          clippy =
+          crate =
             let
               args = {
                 inherit cargoArtifacts;
-                cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+                doCheck = false;
               };
             in
-            craneLib.cargoClippy (commonArgs // args);
+            craneLib.buildPackage (commonArgs // args);
         in
         {
-          _module.args.pkgs = import nixpkgs {
-            inherit system;
-            overlays = [ fenix.overlays.default ];
-          };
           packages.default = crate;
           checks = {
             inherit crate;
-            inherit clippy;
-            test = pkgs.runCommandCC "test" { nativeBuildInputs = [ crate ]; } ''
-              export ARUFA=${crate}/bin/arufa
-              cp -r ${./test} test
-              ./test/run.sh
-              touch $out
-            '';
+            tests = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
+            clippy =
+              let
+                args = {
+                  inherit cargoArtifacts;
+                  cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+                };
+              in
+              craneLib.cargoClippy (commonArgs // args);
+            binary-test = stdenv.mkDerivation {
+              name = "binary-test";
+              src = ./test;
+              nativeBuildInputs = [
+                crate
+                llvm
+              ];
+              buildInputs = [ stdenv.cc.cc.lib ];
+              dontBuild = true;
+              doCheck = true;
+              checkPhase = ''
+                export ARUFA=${crate}/bin/arufa
+                ./run.sh
+              '';
+              installPhase = "touch $out";
+            };
           };
-          devShells.default = craneLib.devShell {
-            inputsFrom = [ crate ];
-            packages = with pkgs; [
-              nixd
-              nixfmt
-              taplo
-              clang-tools
-            ];
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
-          };
+          devShells.default =
+            let
+              devShell = craneLib.devShell.override {
+                mkShell = pkgs.mkShell.override { inherit stdenv; };
+              };
+            in
+            devShell {
+              inputsFrom = [ crate ];
+              packages = with pkgs; [
+                nixd
+                nixfmt
+                taplo
+                clang-tools
+              ];
+              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+            };
         };
     };
 }

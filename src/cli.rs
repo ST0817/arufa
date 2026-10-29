@@ -5,6 +5,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Emit {
     Ir,
+    Asm,
     Obj,
 }
 

@@ -79,7 +79,7 @@ fn atom_type<'tokens, 'src: 'tokens, I: InputBound<'tokens, 'src>>()
         just(Token::I64).to(Type::I64),
         just(Token::Bool).to(Type::Bool),
         just(Token::Char).to(Type::Char),
-        just(Token::Str).to(Type::Str),
+        just(Token::Str).to(Type::ArrayPtr(Box::new(Type::Char))),
         parens(empty()).to(Type::Unit),
     ))
 }

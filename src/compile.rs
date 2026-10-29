@@ -52,7 +52,7 @@ impl<'ctx> Compiler<'ctx> {
             U32 | I32 => self.context.i32_type().as_basic_type_enum(),
             U64 | I64 => self.context.i64_type().as_basic_type_enum(),
             Bool => self.context.bool_type().as_basic_type_enum(),
-            Ptr(_) | Str | ArrayPtr(_) => self
+            Ptr(_) | ArrayPtr(_) => self
                 .context
                 .ptr_type(AddressSpace::default())
                 .as_basic_type_enum(),

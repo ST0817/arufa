@@ -21,7 +21,6 @@ pub enum Type {
     I64,
     Bool,
     Char,
-    Str,
     Unit,
     Ptr(Box<Self>),
     Array(Box<Self>, u64),
@@ -36,7 +35,7 @@ impl Type {
             U8 | I8 | Bool | Char => 1,
             U16 | I16 => 2,
             U32 | I32 => 4,
-            U64 | I64 | Ptr(_) | Str | ArrayPtr(_) => 8,
+            U64 | I64 | Ptr(_) | ArrayPtr(_) => 8,
             Array(ty, len) => ty.size() * *len as usize,
         }
     }
@@ -64,7 +63,7 @@ impl Type {
         use Type::*;
         match self {
             U8 | U16 | U32 | U64 | Bool | Char | I8 | I16 | I32 | I64 => CastType::Int,
-            Ptr(_) | ArrayPtr(_) | Str => CastType::Ptr,
+            Ptr(_) | ArrayPtr(_) => CastType::Ptr,
             Array(..) | Unit => CastType::None,
         }
     }
@@ -88,10 +87,10 @@ impl Display for Type {
             I64 => f.write_str("i64"),
             Bool => f.write_str("bool"),
             Char => f.write_str("char"),
-            Str => f.write_str("str"),
             Unit => f.write_str("()"),
             Ptr(ty) => write!(f, "{ty}*"),
             Array(ty, len) => write!(f, "{ty}[{len}]"),
+            ArrayPtr(ty) if let Char = ty.as_ref() => f.write_str("str"),
             ArrayPtr(ty) => write!(f, "{ty}[]"),
         }
     }

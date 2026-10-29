@@ -147,7 +147,10 @@ impl<'src, 'symbols> Checker<'src, 'symbols> {
     }
 
     fn check_str_expr(&self, value: String) -> Result<CheckedExpr> {
-        Ok(CheckedExpr::new(CheckedExprKind::Str(value), Type::Str))
+        Ok(CheckedExpr::new(
+            CheckedExprKind::Str(value),
+            Type::ArrayPtr(Box::new(Type::Char)),
+        ))
     }
 
     fn check_unit_expr(&self) -> Result<CheckedExpr> {
